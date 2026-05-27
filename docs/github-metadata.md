@@ -1,16 +1,16 @@
 # GitHub metadata
 
-Use the following when creating the public GitHub repository.
+This document records the public GitHub metadata currently used for the Hermes repository.
 
-## Suggested repository name
+## Repository name
 
 `proofrail-hermes`
 
-## Suggested description
+## Current description
 
 Runtime harness plugin for Hermes with evidence-first execution, verification-first workflows, and self-correcting AI agent behavior.
 
-## Suggested topics
+## Current topics
 
 - hermes
 - ai-agent
@@ -25,7 +25,7 @@ Runtime harness plugin for Hermes with evidence-first execution, verification-fi
 
 ## Search intent covered by README + metadata
 
-The public-facing copy already includes these phrases naturally:
+The public-facing copy currently includes these phrases naturally:
 
 - Codex harness
 - Claude Code harness
