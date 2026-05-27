@@ -5,11 +5,6 @@ import pathlib
 import sys
 import tomllib
 
-try:
-    import yaml
-except Exception:  # pragma: no cover
-    yaml = None
-
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "proofrail"
 
@@ -17,6 +12,23 @@ PACKAGE = ROOT / "proofrail"
 def fail(message: str) -> None:
     print(f"[release-check] FAIL: {message}")
     raise SystemExit(1)
+
+
+def parse_simple_plugin_yaml(path: pathlib.Path) -> dict[str, str]:
+    data: dict[str, str] = {}
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith('#') or ':' not in line:
+            continue
+        key, value = line.split(':', 1)
+        key = key.strip()
+        value = value.strip()
+        if not key or not value:
+            continue
+        if value.startswith((""", "'")) and value.endswith((""", "'")) and len(value) >= 2:
+            value = value[1:-1]
+        data[key] = value
+    return data
 
 
 def main() -> None:
@@ -28,16 +40,18 @@ def main() -> None:
 
     with (ROOT / "pyproject.toml").open("rb") as fh:
         project = tomllib.load(fh)
-    version = project.get("project", {}).get("version")
-    if not version:
+    package_version = project.get("project", {}).get("version")
+    if not package_version:
         fail("pyproject.toml is missing project.version")
 
-    if yaml is not None:
-        plugin = yaml.safe_load((ROOT / "plugin.yaml").read_text())
-        if plugin.get("name") != "proofrail":
-            fail("plugin.yaml name mismatch")
-        if plugin.get("version") != version:
-            fail("plugin.yaml version does not match pyproject.toml")
+    plugin = parse_simple_plugin_yaml(ROOT / "plugin.yaml")
+    if plugin.get("name") != "proofrail":
+        fail("plugin.yaml name mismatch")
+    plugin_version = plugin.get("version")
+    if not plugin_version:
+        fail("plugin.yaml is missing version")
+    if plugin_version != f"v{package_version}":
+        fail("plugin.yaml version must be the public tag form of pyproject.toml (expected v<package_version>)")
 
     expected = {
         "__init__.py",
