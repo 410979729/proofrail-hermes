@@ -9,5 +9,5 @@
 - release check blocks `.proofrail/`, `__pycache__/`, `.pytest_cache/`, `*.pyc`, and `*.pyo` from published artifacts.
 - Add `scripts/verify.package.py` for wheel content inspection and import smoke verification.
 - Current regression suite covers 31 behaviors around hook registration, dangerous command policy, config loading, low-signal blocking, task ledger, validation suggestions, summarization branding, and final report context.
-- Document that public label `v0.0.1` is normalized to `0.0.1` in Python packaging metadata and wheel filenames.
+- Use `v0.0.1` for the GitHub release/tag line and `0.0.1` for Python packaging metadata and wheel filenames.
 - Document audit log sensitivity boundaries in README / configuration / security docs.
