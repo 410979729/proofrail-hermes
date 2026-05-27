@@ -36,11 +36,11 @@ For Hermes, that means a runtime plugin that can:
 
 ## Current status
 
-- Version: `v0.01`
+- Version: `v0.0.1`
 - Host: **Hermes Agent plugin hooks**
 - Language: **Python**
 
-> Version note: the public version line is written as `v0.01`, but Python packaging and wheel filenames normalize it to `0.1` under PEP 440. This is the same release line, not a separate version.
+> Version note: the public version line is written as `v0.0.1`, but Python packaging and wheel filenames normalize it to `0.0.1` under PEP 440. This is the same release line, not a separate version.
 
 ## Quick start
 
