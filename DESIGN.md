@@ -2,18 +2,18 @@
 
 ## Goal
 
-构建一个 **Hermes 原生 Python 插件**，把最关键的一组运行时工作流护栏收敛成清晰、可测试、可发布的实现，优先保证：
+Build a **Hermes-native Python plugin** that turns a focused set of runtime workflow guardrails into a clear, testable, publishable implementation, with priority on:
 
-1. hook 对齐准确
-2. 状态机简单清晰
-3. 每条规则可测试
-4. 不引入跨语言桥接屎山
+1. accurate hook mapping
+2. a simple, explicit state machine
+3. test coverage for every rule
+4. no cross-language bridge complexity
 
 ## Design Principles
 
 ### 1. Runtime > prompt
 
-所有关键约束优先做在 Hermes hook：
+All important constraints should live in Hermes hooks:
 
 - `pre_tool_call`
 - `post_tool_call`
@@ -23,67 +23,67 @@
 - `on_session_end`
 - `on_session_finalize`
 
-prompt 文案只做轻量提醒，不承担真实执行约束。
+Prompt text is only a lightweight reminder layer. It does not carry the real enforcement burden.
 
 ### 2. Shared policy, host-native wiring
 
-策略逻辑保持可复用、可测试，但宿主接线必须 Hermes-native：
+Policy logic should stay reusable and testable, but host wiring must remain Hermes-native.
 
-- 命令检测
-- 低信号判定
-- 阶段状态迁移
-- 结果摘要
+Shared policy includes:
 
-这些是共享 policy。
+- command detection
+- low-signal classification
+- phase transitions
+- result summarization
+
+Hermes adapter responsibilities include:
 
 - `register(ctx)`
-- Hermes hook 返回格式
-- 路径/工具名适配
-
-这些是 Hermes adapter。
+- Hermes hook return shapes
+- path and tool-name adaptation
 
 ### 3. No cross-language bridge in v1
 
-v1 不做 TS runtime + Python shim，不做 node 子进程桥。
+v1 does not use a TS runtime with a Python shim and does not spawn a Node bridge.
 
-原因：
+Why:
 
-- Hermes 插件入口天然是 Python
-- 状态与错误传播在 Python 内最自然
-- 开源后用户安装和排障成本最低
+- Hermes plugin entrypoints are naturally Python
+- state and error propagation are simplest inside Python
+- open-source installation and troubleshooting stay easier for users
 
 ### 4. TDD first
 
-每条规则先有失败测试，再写实现。
+Every rule should start with a failing test before implementation.
 
-当前测试覆盖：
+Current test coverage includes:
 
-- existing file mutation blocked without evidence
-- mutation requires verification before next mutation
-- repeated low-signal probe gets blocked
-- tool result summarization
-- stage-aware pre_llm_call context
+- existing-file mutation blocked without evidence
+- mutation requires verification before the next mutation
+- repeated low-signal probe blocking
+- tool-result summarization
+- stage-aware `pre_llm_call` context
 - session end/finalize cleanup
 
 ## Runtime Model
 
 ### Session phases
 
-只保留三态：
+The state machine intentionally keeps only three phases:
 
 - `observe`
 - `execute`
 - `review`
 
-解释：
+Meaning:
 
-- `observe`：还没拿到足够证据
-- `execute`：已有证据，可做最小改动
-- `review`：刚完成改动，必须先验证
+- `observe`: not enough evidence yet
+- `execute`: enough evidence exists for a minimal change
+- `review`: a recent mutation happened and validation must run next
 
 ### State fields
 
-每个 session 保存：
+Each session stores:
 
 - `phase`
 - `evidence_count`
@@ -97,67 +97,74 @@ v1 不做 TS runtime + Python shim，不做 node 子进程桥。
 
 ### State lifecycle
 
-- `on_session_start`：确保 session state 初始化
-- `post_tool_call`：推进状态机
-- `on_session_end` / `on_session_finalize`：清理 session state
-- store 达到 TTL 或容量上限时自动 prune
+- `on_session_start`: initialize session state
+- `post_tool_call`: advance the state machine
+- `on_session_end` / `on_session_finalize`: clean up session state
+- prune automatically when TTL expires or capacity is exceeded
 
 ## Hook Contracts
 
 ### pre_tool_call
 
-返回：
+Returns:
 
 ```python
 {"action": "block", "message": "..."}
 ```
 
-负责：
+Responsibilities:
 
-- 危险命令拦截/审批前判定
-- 无证据修改已有文件拦截
-- 未验证前继续变更拦截
-- 同一低信号 intent 重复探测拦截
+- dangerous-command gating
+- block existing-file mutation without evidence
+- block further mutation before validation
+- block repeated low-signal probing with the same intent
 
 ### post_tool_call
 
-负责：
+Responsibilities:
 
-- 识别 observation / mutation / validation
-- 更新 evidence count
-- 设置 `pending_verification`
-- 维护 low-signal 连击状态
+- classify observation / mutation / validation
+- update evidence counts
+- set `pending_verification`
+- maintain the low-signal streak state
 
 ### transform_tool_result
 
-负责：
+Responsibilities:
 
-- 对超大工具输出做摘要
-- 减少上下文污染
+- summarize oversized tool output
+- reduce context pollution
 
 ### pre_llm_call
 
-负责：
+Responsibilities:
 
-- 注入阶段说明和运行时提醒
-- 不直接改 system prompt，只追加上下文文本
+- inject phase summaries and runtime reminders
+- append context rather than rewriting the system prompt
 
 ## Current v0.0.1 autonomous harness layer
 
-v0.0.1 已经完成：
+v0.0.1 currently includes:
 
-1. 默认 `dangerous_command_action=warn`，高风险命令不进入手动审批流，但会写入审计并注入自验证提醒。
-2. 新增 JSONL audit trail，记录 session、tool preflight、dangerous command、tool result、large-output summarization 等事件。
-3. 新增 validation suggestion layer，根据触碰文件和命令形态建议最窄验证命令。
-4. session state 记录 mutation / validation / dangerous 计数、触碰文件、验证建议、最近验证和最近高风险标签。
-5. `pre_llm_call` 注入触碰文件、建议验证、高风险审计提醒和最终证据汇报要求。
-6. 当前测试覆盖 hook 注册、危险命令、evidence-before-mutation、verify-after-mutation、低信号阻断、摘要、任务账本、审计日志和 review 状态清理。
+1. default `dangerous_command_action=warn`; high-risk commands stay out of a manual approval loop, but they are audited and paired with self-verification reminders
+2. a JSONL audit trail for session lifecycle, tool preflight, dangerous commands, tool results, and large-output summarization
+3. a validation-suggestion layer that proposes narrow follow-up checks from touched files and command shape
+4. session state for mutation / validation / dangerous-command counts, touched files, validation suggestions, and recent labels
+5. `pre_llm_call` injection of touched files, suggested validations, dangerous-command audit reminders, and final evidence-report requirements
+6. tests covering hook registration, dangerous-command handling, evidence-before-mutation, verify-after-mutation, low-signal blocking, summarization, task ledger, audit logging, and review-state cleanup
+
+## Version semantics
+
+- GitHub release/tag line: `v0.0.1`
+- Python package version: `0.0.1`
+
+This split is intentional: GitHub tags keep the leading `v`, while Python packaging follows PEP 440.
 
 ## Planned Next Steps
 
-1. 增加 durable task ledger，用于记录任务目标、验收条件、证据、变更、验证和最终状态。
-2. 将 `explain_state()` 暴露为正式 Hermes debug tool。
-3. 增加 diff / mutation review 摘要，把修改范围纳入最终复核。
-4. 增加 compaction 相关快照和恢复锚点。
-5. 增加 clean-install / wheel / plugin-dir 安装 smoke test。
-6. 在真实 Hermes 实例里做灰度启用和真实任务验证。
+1. add a durable task ledger for task goals, acceptance criteria, evidence, mutations, validations, and final state
+2. expose `explain_state()` as a formal Hermes debug tool
+3. add diff / mutation review summaries to the final review lane
+4. add compaction-related snapshots and recovery anchors
+5. add clean-install / wheel / plugin-dir installation smoke tests
+6. validate the plugin in a live Hermes rollout
