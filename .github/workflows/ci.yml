@@ -1,0 +1,24 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install pytest pyyaml build
+      - run: python -m py_compile __init__.py proofrail/*.py scripts/check.release.py scripts/verify.package.py
+      - run: pytest -q tests/test_proofrail.py
+      - run: rm -rf __pycache__ proofrail/__pycache__ tests/__pycache__ scripts/__pycache__ .pytest_cache
+      - run: python scripts/check.release.py
+      - run: python -m build --wheel
+      - run: python scripts/verify.package.py
+      - run: rm -rf __pycache__ proofrail/__pycache__ tests/__pycache__ scripts/__pycache__ build dist *.egg-info .pytest_cache
+      - run: python scripts/check.release.py
