@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "proofrail"
+version = "v0.01"
+description = "Runtime harness plugin for Hermes with evidence-first execution, verification, and self-correcting agent workflows."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "Yuheng"}]
+keywords = ["hermes", "agent", "runtime", "harness", "agent harness", "codex harness", "claude code harness", "evidence-first"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+]
+dependencies = []
+
+[tool.setuptools]
+packages = ["proofrail"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = ["-p", "no:cacheprovider"]
+
+[tool.setuptools.package-data]
+proofrail = ["py.typed"]
