@@ -57,7 +57,7 @@ def main() -> None:
 
         if PLUGIN_NAME != 'proofrail':
             fail(f'unexpected plugin name constant: {PLUGIN_NAME!r}')
-        if PLUGIN_VERSION != 'v0.01':
+        if PLUGIN_VERSION != 'v0.0.1':
             fail(f'unexpected plugin version constant: {PLUGIN_VERSION!r}')
 
     print('[package-verify] ok')
