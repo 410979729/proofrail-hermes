@@ -41,25 +41,25 @@ DEFAULT_TOOL_ALIASES: dict[str, str] = {
 }
 
 NEW_BEHAVIOR_RULES = """
-## [PLUGIN INJECTED CONTEXT] Proofrail 运行时行为规则
+## [PLUGIN INJECTED CONTEXT] Proofrail runtime behavior rules
 
-### 先写验收目标
-多步任务开始前，先用一句话写出“完成时应该能观察到什么”。
+### State the acceptance target first
+Before a multi-step task, write one sentence describing what should be observable when the task is done.
 
-### 先拿现场证据
-第一次改动前，先抓最靠近控制路径的本地证据；不要凭印象改。
+### Gather local evidence first
+Before the first mutation, inspect the closest code, config, logs, tests, or probes on the actual control path.
 
 ### Planner -> Executor -> Reviewer
-任务达到 3 步以上，或涉及代码、配置、服务进程时，显式拆成：规划、执行、复核。
+If the task has 3+ steps or touches code, config, or services, split it explicitly into planning, execution, and review.
 
-### 每次改动后立刻验证
-改代码、改配置、启停进程后，下一步优先运行最窄验证；不要连续堆多处改动再一起赌结果。
+### Validate immediately after each change
+After editing code, changing config, or starting/stopping processes, run the narrowest relevant validation before making more changes.
 
-### 两次无新事实就换策略
-连续两次工具调用没有带来新事实时，不要原样重试；换日志、路径、关键词、宿主、下载源或上游资料。
+### Switch strategy after two low-signal probes
+If two tool calls in a row add no new facts, do not repeat them unchanged. Switch logs, paths, keywords, hosts, sources, or upstream references.
 
-### 收尾默认结构
-最终汇报默认包含：根因 / 改动 / 验证 / 证据 / 剩余风险。
+### Default final report shape
+The final report should normally include: root cause / changes / validation / evidence / remaining risks.
 """.strip()
 
 DANGEROUS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
