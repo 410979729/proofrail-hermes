@@ -9,7 +9,9 @@ to review.
 from __future__ import annotations
 
 import logging
+import shlex
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any
 
 from .audit import AuditLogger, default_audit_log_path
@@ -28,9 +30,98 @@ from .validation import changed_path_hints, suggest_validations
 logger = logging.getLogger(__name__)
 HookDecision = dict[str, str]
 
+_FILE_INSPECTION_EXECUTABLES = {
+    "awk",
+    "bat",
+    "batcat",
+    "cat",
+    "file",
+    "grep",
+    "head",
+    "less",
+    "more",
+    "nl",
+    "rg",
+    "sed",
+    "stat",
+    "tail",
+    "wc",
+}
+_COMMAND_WRAPPERS = {"command", "env", "sudo", "time"}
+
 
 def _decision(action: str, message: str) -> HookDecision:
     return {"action": action, "message": message}
+
+
+def _base_dir_for_tool_call(payload: dict[str, Any], root_dir: str | None) -> str | None:
+    cwd = payload.get("cwd")
+    if isinstance(cwd, str) and cwd.strip():
+        return cwd.strip()
+    return root_dir
+
+
+def _normalize_path_hint(path_hint: str, base_dir: str | None) -> str | None:
+    if not path_hint or path_hint.startswith(("http://", "https://")):
+        return None
+    try:
+        path = Path(path_hint).expanduser()
+        if not path.is_absolute():
+            path = (Path(base_dir).expanduser() if base_dir else Path.cwd()) / path
+        return str(path.resolve(strict=False))
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+
+def _path_hints_overlap(left: tuple[str, ...] | list[str], right: tuple[str, ...] | list[str], base_dir: str | None) -> bool:
+    if not left or not right:
+        return False
+    left_paths = {_normalize_path_hint(path, base_dir) for path in left}
+    right_paths = {_normalize_path_hint(path, base_dir) for path in right}
+    left_paths.discard(None)
+    right_paths.discard(None)
+    return bool(left_paths & right_paths)
+
+
+def _exec_program(command: str) -> str:
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        parts = command.split()
+    while parts:
+        program = Path(parts.pop(0)).name
+        if program == "env":
+            while parts and "=" in parts[0] and not parts[0].startswith("-"):
+                parts.pop(0)
+            continue
+        if program in _COMMAND_WRAPPERS:
+            continue
+        return program
+    return ""
+
+
+def _is_file_readback_call(category: str, command: str, mutating_exec: bool) -> bool:
+    if category == "read":
+        return True
+    if category != "exec" or mutating_exec or not command:
+        return False
+    return _exec_program(command) in _FILE_INSPECTION_EXECUTABLES
+
+
+def _readback_validates_touched_file(
+    *,
+    category: str,
+    payload: dict[str, Any],
+    command: str,
+    mutating_exec: bool,
+    touched_files: tuple[str, ...],
+    read_paths: list[str],
+    root_dir: str | None,
+) -> bool:
+    if not _is_file_readback_call(category, command, mutating_exec):
+        return False
+    base_dir = _base_dir_for_tool_call(payload, root_dir)
+    return _path_hints_overlap(touched_files, read_paths, base_dir)
 
 
 class RuntimeHooks:
@@ -199,8 +290,22 @@ class RuntimeHooks:
         text = extract_text_from_tool_result(result)
         status = get_tool_result_status(result)
         error_text = "" if status != "failure" else text
-        validation_succeeded = validating_exec and status == "success"
         touched_paths = changed_path_hints(tool_name, payload, command)
+        prior_state = STATE_STORE.snapshot(session_id)
+        readback_validation_succeeded = (
+            prior_state.pending_verification
+            and status != "failure"
+            and _readback_validates_touched_file(
+                category=category,
+                payload=payload,
+                command=command,
+                mutating_exec=mutating_exec,
+                touched_files=prior_state.touched_files,
+                read_paths=touched_paths,
+                root_dir=self.root_dir,
+            )
+        )
+        validation_succeeded = (validating_exec and status == "success") or readback_validation_succeeded
         validation_suggestions = suggest_validations(tool_name=tool_name, args=payload, command=command, mutating_exec=mutating_exec)
         state = record_tool_observation(
             session_id=session_id,
@@ -224,6 +329,7 @@ class RuntimeHooks:
             text_preview=compact_label(text, 500),
             mutating_exec=mutating_exec,
             validating_exec=validating_exec,
+            readback_validation_succeeded=readback_validation_succeeded,
             validation_succeeded=validation_succeeded,
             phase=state.phase,
             pending_verification=state.pending_verification,
