@@ -142,9 +142,9 @@ v1 不做 TS runtime + Python shim，不做 node 子进程桥。
 - 注入阶段说明和运行时提醒
 - 不直接改 system prompt，只追加上下文文本
 
-## Current v0.01 autonomous harness layer
+## Current v0.0.1 autonomous harness layer
 
-v0.01 已经完成：
+v0.0.1 已经完成：
 
 1. 默认 `dangerous_command_action=warn`，高风险命令不进入手动审批流，但会写入审计并注入自验证提醒。
 2. 新增 JSONL audit trail，记录 session、tool preflight、dangerous command、tool result、large-output summarization 等事件。
