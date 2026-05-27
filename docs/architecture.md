@@ -116,4 +116,4 @@ on_session_end / on_session_finalize
 
 ### `task_ledger.py`
 
-Session 级自主任务账本。它不引入人工审批流，而是把证据、改动、验证、高风险动作、触碰文件和最终状态汇总成可注入上下文与可写入审计日志的 task snapshot。
+Session-level autonomous task ledger. It does not introduce a manual approval loop; it summarizes evidence, mutations, validations, high-risk actions, touched files, and final state into a task snapshot that can be injected into context and written to the audit log.
