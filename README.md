@@ -85,7 +85,7 @@ If the target instance already has other plugins, append `proofrail` to the exis
 
 ## Configuration
 
-The default configuration is usable as-is and optimized for autonomous execution: dangerous commands default to `warn`, meaning they are allowed with audit + follow-up verification expectations.
+The default configuration is usable as-is and optimized for autonomous execution: dangerous commands default to `warn`, meaning they stay in autonomous mode with audit + follow-up verification expectations, but they are still subject to the same evidence-before-mutation and verify-after-mutation guardrails as any other mutating command.
 
 If your Hermes build exposes `plugins.entries`, you can override settings like this:
 
