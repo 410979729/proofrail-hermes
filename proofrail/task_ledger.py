@@ -48,27 +48,27 @@ def task_snapshot(state: SessionRuntimeState) -> dict[str, Any]:
 def render_task_context(state: SessionRuntimeState) -> str:
     """Render task-ledger context for pre_llm_call injection."""
     lines = [
-        "## [PLUGIN STATE] 自主任务账本",
-        f"- 状态: {task_status(state)}",
-        f"- 证据/改动/验证: {state.evidence_count}/{state.mutation_count}/{state.validation_count}",
+        "## [PLUGIN STATE] Autonomous task ledger",
+        f"- Status: {task_status(state)}",
+        f"- Evidence / mutations / validations: {state.evidence_count}/{state.mutation_count}/{state.validation_count}",
     ]
     if state.evidence_labels:
-        lines.append("- 最近证据:")
+        lines.append("- Recent evidence:")
         lines.extend(f"  - {item}" for item in state.evidence_labels[-5:])
     if state.mutation_labels:
-        lines.append("- 本轮改动:")
+        lines.append("- Mutations in this session:")
         lines.extend(f"  - {item}" for item in state.mutation_labels[-5:])
     if state.validation_labels:
-        lines.append("- 已通过验证:")
+        lines.append("- Validations passed:")
         lines.extend(f"  - {item}" for item in state.validation_labels[-5:])
     if state.pending_verification:
-        lines.append("- 下一步: 先运行最窄验证，不要继续叠加新改动。")
+        lines.append("- Next: run the narrowest validation before adding more changes.")
     elif state.mutation_count and state.validation_count:
-        lines.append("- 下一步: 可以继续推进，但每次新增改动后仍要立刻验证。")
+        lines.append("- Next: you may continue, but every new mutation still needs immediate validation.")
     elif state.evidence_count:
-        lines.append("- 下一步: 可以做最小可解释改动，随后立刻验证。")
+        lines.append("- Next: make the smallest explainable change, then validate it immediately.")
     else:
-        lines.append("- 下一步: 先读取最靠近控制路径的代码、配置、日志或测试。")
+        lines.append("- Next: inspect code, config, logs, or tests closest to the control path.")
     return "\n".join(lines)
 
 
@@ -77,14 +77,14 @@ def final_review_checklist(state: SessionRuntimeState) -> list[str]:
     if not state.final_report_required and not state.mutation_count:
         return []
     checklist = [
-        "根因：说明问题为什么发生。",
-        "改动：列出改了哪些文件/配置/命令路径。",
-        "验证：列出实际运行的验证命令和结果。",
-        "证据：引用关键工具结果、测试结果或日志事实。",
-        "剩余风险：说明未验证点、环境限制或后续建议。",
+        "Root cause: explain why the problem happened.",
+        "Changes: list the files, configs, or command paths you changed.",
+        "Validation: list the commands you actually ran and their results.",
+        "Evidence: cite the key tool results, test results, or log facts.",
+        "Remaining risks: note any unverified points, environment limits, or follow-up advice.",
     ]
     if state.pending_verification:
-        checklist.insert(0, "未完成：当前仍有未验证改动，最终答复前必须先补验证。")
+        checklist.insert(0, "Incomplete: there are still unvalidated changes and they must be verified before the final response.")
     return checklist
 
 
