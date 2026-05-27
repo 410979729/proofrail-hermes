@@ -144,13 +144,13 @@ class RuntimeHooks:
                 policy=self.settings.dangerous_command_action,
             )
             if self.settings.dangerous_command_action == "block":
-                return self._blocked(session_id, tool_name, payload, f"检测到高风险命令，已按插件策略直接阻止：{label}", reason="dangerous_command")
+                return self._blocked(session_id, tool_name, payload, f"High-risk command blocked by plugin policy: {label}", reason="dangerous_command")
             if self.settings.dangerous_command_action == "approve":
                 return self._blocked(
                     session_id,
                     tool_name,
                     payload,
-                    f"检测到高风险命令，需要人工确认后手动重试：{label}",
+                    f"High-risk command requires manual confirmation before retry: {label}",
                     reason="dangerous_command_approve",
                 )
             # warn/allow are autonomous modes. They do not ask the user, but
@@ -163,13 +163,13 @@ class RuntimeHooks:
                 self.audit.record("tool_decision", session_id=session_id or "default", tool_name=tool_name, decision={"action": "allow"}, reason="dangerous_command_allow_if_workflow_checks_pass")
 
         if state.pending_verification and is_mutation:
-            return self._blocked(session_id, tool_name, payload, f"先验证刚才的改动：{state.last_mutation_label or 'recent mutation'}", reason="pending_verification")
+            return self._blocked(session_id, tool_name, payload, f"Validate the recent change before continuing: {state.last_mutation_label or 'recent mutation'}", reason="pending_verification")
 
         if state.evidence_count == 0 and (mutating_exec or mutation_touches_existing_path):
-            return self._blocked(session_id, tool_name, payload, "先读取附近代码、配置、日志或测试，拿到现场证据后再改已有文件或启停进程。", reason="missing_evidence")
+            return self._blocked(session_id, tool_name, payload, "Inspect nearby code, config, logs, or tests first. Gather local evidence before editing existing files or changing processes.", reason="missing_evidence")
 
         if state.consecutive_low_signal >= self.settings.low_signal_block_threshold and state.last_low_signal_intent == tool_intent:
-            return self._blocked(session_id, tool_name, payload, "最近连续多次工具调用没有带来新事实。请换路径、关键词、日志源、宿主或验证方式。", reason="low_signal_repeat")
+            return self._blocked(session_id, tool_name, payload, "Recent tool calls produced no new facts. Switch paths, keywords, log sources, hosts, or validation methods.", reason="low_signal_repeat")
 
         self.audit.record(
             "tool_preflight",
@@ -254,28 +254,28 @@ class RuntimeHooks:
         state = STATE_STORE.snapshot(session_id)
         extra = NEW_BEHAVIOR_RULES
         if state.phase == "observe":
-            extra += "\n\n## [PLUGIN STATE] 当前阶段: Observe\n还没有拿到足够的现场证据。先读控制路径附近的代码、配置、日志、测试或健康探针；对已有文件和进程的直接变更会被拦截。"
+            extra += "\n\n## [PLUGIN STATE] Current phase: Observe\nThere is not enough local evidence yet. Inspect code, config, logs, tests, or health probes on the control path before mutating existing files or processes."
         elif state.phase == "execute":
-            suffix = f"（最近一次: {state.last_evidence_label}）" if state.last_evidence_label else ""
-            extra += f"\n\n## [PLUGIN STATE] 当前阶段: Execute\n已取得现场证据{suffix}。继续沿控制路径做最小改动，不要跳步扩大修改面。"
+            suffix = f" (latest: {state.last_evidence_label})" if state.last_evidence_label else ""
+            extra += f"\n\n## [PLUGIN STATE] Current phase: Execute\nLocal evidence has been gathered{suffix}. Keep the next change minimal and stay close to the control path."
         elif state.phase == "review":
-            extra += f"\n\n## [PLUGIN STATE] 当前阶段: Review\n最近刚发生过变更（{state.last_mutation_label or 'recent mutation'}）。先做最窄验证，再继续扩大修改面。"
+            extra += f"\n\n## [PLUGIN STATE] Current phase: Review\nA recent change was made ({state.last_mutation_label or 'recent mutation'}). Run the narrowest validation before expanding the change set."
         extra += "\n\n" + render_task_context(state)
         if state.pending_verification:
-            extra += f"\n\n## [PLUGIN REMINDER] ⚠️ 先验证再继续\n刚刚发生过文件/配置/进程变更（{state.last_mutation_label or 'recent mutation'}）。下一步优先做最窄验证，不要继续堆改动。"
+            extra += f"\n\n## [PLUGIN REMINDER] ⚠️ Validate before continuing\nA file, config, or process change just happened ({state.last_mutation_label or 'recent mutation'}). Run the narrowest validation next instead of stacking more changes."
         if state.validation_suggestions:
             suggestions = "\n".join(f"- {item}" for item in state.validation_suggestions)
-            extra += f"\n\n## [PLUGIN REMINDER] 建议的最窄验证\n{suggestions}"
+            extra += f"\n\n## [PLUGIN REMINDER] Suggested narrow validation\n{suggestions}"
         if state.touched_files:
             touched = "\n".join(f"- {item}" for item in state.touched_files)
-            extra += f"\n\n## [PLUGIN STATE] 本轮已触碰文件/路径\n{touched}"
+            extra += f"\n\n## [PLUGIN STATE] Touched files / paths in this session\n{touched}"
         if state.dangerous_count:
-            extra += f"\n\n## [PLUGIN STATE] ⚠️ 高风险动作审计\n本轮已观察到 {state.dangerous_count} 次高风险命令（最近一次：{state.last_dangerous_label}）。如果继续自主执行，必须验证影响并在最终汇报里说明风险。"
+            extra += f"\n\n## [PLUGIN STATE] ⚠️ High-risk command audit\nObserved {state.dangerous_count} high-risk command(s) in this session (latest: {state.last_dangerous_label}). If autonomous execution continues, validate the effects and explain the risk in the final report."
         checklist = final_review_checklist(state)
         if checklist:
-            extra += "\n\n## [PLUGIN REMINDER] 最终汇报要求 / 最终汇报检查表\n" + "\n".join(f"- {item}" for item in checklist)
+            extra += "\n\n## [PLUGIN REMINDER] Final report requirements / checklist\n" + "\n".join(f"- {item}" for item in checklist)
         if state.consecutive_low_signal >= self.settings.low_signal_block_threshold:
-            extra += f"\n\n## [PLUGIN REMINDER] ⚠️ 立刻换探针\n最近连续 {state.consecutive_low_signal} 次工具调用没有带来新事实。不要重复同样的命令或同一层搜索；改用别的日志、路径、关键词、宿主、下载源或上游文档。"
+            extra += f"\n\n## [PLUGIN REMINDER] ⚠️ Switch probes now\nThe last {state.consecutive_low_signal} tool calls produced no new facts. Do not repeat the same command or search layer unchanged; switch logs, paths, keywords, hosts, sources, or upstream docs."
         return asdict(LlmContextResult(context=extra))
 
     def _blocked(self, session_id: str, tool_name: str, args: dict[str, Any], message: str, *, reason: str) -> HookDecision:
