@@ -63,7 +63,7 @@ def test_register_reads_plugin_settings_from_hermes_style_config(tmp_path: Path)
     decision = pre_tool_call("shell", {"command": "git push --force"}, session_id="config-approve")
     assert decision is not None
     assert decision["action"] == "block"
-    assert "人工确认" in decision["message"]
+    assert "manual confirmation" in decision["message"]
 
 
 def test_settings_mapping_is_sanitized() -> None:
@@ -119,7 +119,7 @@ def test_no_evidence_blocks_mutation_of_existing_file(tmp_path: Path) -> None:
     decision = hooks.pre_tool_call("write_file", {"path": "existing.txt", "content": "new"}, session_id="evidence-existing")
     assert decision is not None
     assert decision["action"] == "block"
-    assert "先读取" in decision["message"]
+    assert "Inspect nearby" in decision["message"]
 
 
 def test_new_file_creation_is_allowed_without_evidence(tmp_path: Path) -> None:
@@ -150,7 +150,7 @@ def test_mutation_requires_validation_before_next_mutation(tmp_path: Path) -> No
     blocked = hooks.pre_tool_call("write_file", {"path": "existing.txt", "content": "newer"}, session_id=session_id)
     assert blocked is not None
     assert blocked["action"] == "block"
-    assert "先验证" in blocked["message"]
+    assert "Validate the recent change" in blocked["message"]
 
     hooks.post_tool_call("terminal", {"command": "pytest -q"}, {"exit_code": 0, "stdout": "1 passed"}, session_id=session_id)
     assert hooks.pre_tool_call("write_file", {"path": "existing.txt", "content": "newer"}, session_id=session_id) is None
@@ -165,7 +165,7 @@ def test_low_signal_repeated_probe_blocks_same_intent() -> None:
     blocked = hooks.pre_tool_call("search_files", args, session_id=session_id)
     assert blocked is not None
     assert blocked["action"] == "block"
-    assert "换路径" in blocked["message"]
+    assert "Switch paths" in blocked["message"]
 
 
 def test_low_signal_threshold_is_configurable() -> None:
@@ -235,7 +235,7 @@ def test_warn_mode_audits_dangerous_command_but_keeps_workflow_guardrails(tmp_pa
     blocked = hooks.pre_tool_call("terminal", {"command": "git push --force"}, session_id="warn-danger")
     assert blocked is not None
     assert blocked["action"] == "block"
-    assert "先读取" in blocked["message"]
+    assert "Inspect nearby" in blocked["message"]
 
     hooks.post_tool_call("read_file", {"path": "README.md"}, "readme", session_id="warn-danger")
     decision = hooks.pre_tool_call("terminal", {"command": "git push --force"}, session_id="warn-danger")
@@ -258,8 +258,8 @@ def test_mutation_records_validation_suggestions_in_context(tmp_path: Path) -> N
     assert "module.py" in state["touched_files"]
     assert any("pytest" in item for item in state["validation_suggestions"])
     context = hooks.pre_llm_call(session_id=session_id)["context"]
-    assert "建议的最窄验证" in context
-    assert "最终汇报要求" in context
+    assert "Suggested narrow validation" in context
+    assert "Final report requirements" in context
 
 
 def test_validation_success_updates_review_state(tmp_path: Path) -> None:
@@ -356,9 +356,9 @@ def test_task_ledger_tracks_evidence_mutation_and_validation(tmp_path: Path) -> 
     assert state["validation_suggestions"]
 
     ctx = hooks.pre_llm_call(session_id=session_id)["context"]
-    assert "自主任务账本" in ctx
-    assert "最终汇报检查表" in ctx
-    assert "未完成：当前仍有未验证改动" in ctx
+    assert "Autonomous task ledger" in ctx
+    assert "checklist" in ctx
+    assert "Incomplete: there are still unvalidated changes" in ctx
 
     hooks.post_tool_call("terminal", {"command": "pytest -q"}, {"exit_code": 0, "stdout": "1 passed"}, session_id=session_id)
     validated = hooks.explain_state(session_id)
@@ -449,7 +449,7 @@ def test_write_with_cwd_relative_existing_file_requires_evidence(tmp_path):
 
     assert decision is not None
     assert decision["action"] == "block"
-    assert "先读取" in decision["message"]
+    assert "Inspect nearby" in decision["message"]
 
 
 def test_summary_marker_uses_proofrail_brand() -> None:
