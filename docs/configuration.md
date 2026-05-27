@@ -1,6 +1,6 @@
 # Configuration
 
-The plugin works without configuration. The default behavior is optimized for autonomous Hermes instances: dangerous commands are not sent into a manual approval loop by default; they are allowed with audit warnings and self-verification reminders.
+The plugin works without configuration. The default behavior is optimized for autonomous Hermes instances: dangerous commands are not sent into a manual approval loop by default; they stay in autonomous warn/audit mode, but they are still blocked whenever the normal workflow guardrails require evidence first or validation first.
 
 If your Hermes build exposes plugin config through `plugins.entries`, use this shape:
 
