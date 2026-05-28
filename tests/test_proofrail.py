@@ -119,13 +119,49 @@ def test_no_evidence_blocks_mutation_of_existing_file(tmp_path: Path) -> None:
     decision = hooks.pre_tool_call("write_file", {"path": "existing.txt", "content": "new"}, session_id="evidence-existing")
     assert decision is not None
     assert decision["action"] == "block"
-    assert "Inspect nearby" in decision["message"]
+    assert "Blocked by Proofrail [missing_evidence]" in decision["message"]
 
 
 def test_new_file_creation_is_allowed_without_evidence(tmp_path: Path) -> None:
     hooks = build_runtime_hooks(root_dir=str(tmp_path))
     decision = hooks.pre_tool_call("write_file", {"path": "new.txt", "content": "new"}, session_id="new-file")
     assert decision is None
+
+
+def test_missing_evidence_block_message_points_to_direct_target_check(tmp_path: Path) -> None:
+    target = tmp_path / "existing.txt"
+    target.write_text("old")
+    hooks = build_runtime_hooks(root_dir=str(tmp_path))
+
+    decision = hooks.pre_tool_call("write_file", {"path": "existing.txt", "content": "new"}, session_id="missing-evidence-direct-next-step")
+    assert decision is not None
+    assert decision["action"] == "block"
+    assert "Blocked by Proofrail" in decision["message"]
+    assert "missing_evidence" in decision["message"]
+    assert "Target: existing.txt" in decision["message"]
+    assert "Recommended next step" in decision["message"]
+    assert "One direct check is enough" in decision["message"]
+    assert "Do not:" in decision["message"]
+
+
+def test_pending_verification_block_message_points_to_touched_target(tmp_path: Path) -> None:
+    target = tmp_path / "existing.txt"
+    target.write_text("old")
+    hooks = build_runtime_hooks(root_dir=str(tmp_path))
+    session_id = "pending-verification-direct-next-step"
+
+    hooks.post_tool_call("read_file", {"path": "existing.txt"}, "old", session_id=session_id)
+    hooks.post_tool_call("write_file", {"path": "existing.txt", "content": "new"}, {"success": True}, session_id=session_id)
+
+    blocked = hooks.pre_tool_call("write_file", {"path": "existing.txt", "content": "newer"}, session_id=session_id)
+    assert blocked is not None
+    assert blocked["action"] == "block"
+    assert "Blocked by Proofrail" in blocked["message"]
+    assert "pending_verification" in blocked["message"]
+    assert "Target: existing.txt" in blocked["message"]
+    assert "Recommended next step" in blocked["message"]
+    assert "Enough when" in blocked["message"]
+    assert "Do not:" in blocked["message"]
 
 
 def test_custom_write_alias_blocks_existing_file_without_evidence(tmp_path: Path) -> None:
@@ -150,10 +186,95 @@ def test_mutation_requires_validation_before_next_mutation(tmp_path: Path) -> No
     blocked = hooks.pre_tool_call("write_file", {"path": "existing.txt", "content": "newer"}, session_id=session_id)
     assert blocked is not None
     assert blocked["action"] == "block"
-    assert "Validate the recent change" in blocked["message"]
+    assert "Blocked by Proofrail [pending_verification]" in blocked["message"]
 
     hooks.post_tool_call("terminal", {"command": "pytest -q"}, {"exit_code": 0, "stdout": "1 passed"}, session_id=session_id)
     assert hooks.pre_tool_call("write_file", {"path": "existing.txt", "content": "newer"}, session_id=session_id) is None
+
+
+def test_pending_verification_block_injects_no_bypass_guidance(tmp_path: Path) -> None:
+    target = tmp_path / "existing.txt"
+    target.write_text("old")
+    hooks = build_runtime_hooks(root_dir=str(tmp_path))
+    session_id = "blocked-pending-no-bypass"
+
+    hooks.post_tool_call("read_file", {"path": "existing.txt"}, "old", session_id=session_id)
+    hooks.post_tool_call("write_file", {"path": "existing.txt", "content": "new"}, {"success": True}, session_id=session_id)
+    blocked = hooks.pre_tool_call("write_file", {"path": "existing.txt", "content": "newer"}, session_id=session_id)
+
+    assert blocked is not None
+    context = hooks.pre_llm_call(session_id=session_id)["context"]
+    assert "Last tool call was blocked" in context
+    assert blocked["message"] in context
+    assert "Do not look for alternate tools, wrapper tools, or equivalent mutations" in context
+    assert "Treat the block message as the required next step" in context
+    assert "Validate the last mutation before any more changes" in context
+    assert "The next step is validation of the touched path/process" in context
+    assert "Do not inspect plugin source or search for alternate mutation paths" in context
+
+
+def test_missing_evidence_block_injects_narrow_evidence_guidance(tmp_path: Path) -> None:
+    target = tmp_path / "existing.txt"
+    target.write_text("old")
+    hooks = build_runtime_hooks(root_dir=str(tmp_path))
+    session_id = "blocked-missing-evidence-no-bypass"
+
+    blocked = hooks.pre_tool_call("write_file", {"path": "existing.txt", "content": "new"}, session_id=session_id)
+
+    assert blocked is not None
+    context = hooks.pre_llm_call(session_id=session_id)["context"]
+    assert "Last tool call was blocked" in context
+    assert blocked["message"] in context
+    assert "Do not look for alternate tools, wrapper tools, or equivalent mutations" in context
+    assert "Gather local evidence on the same control path" in context
+    assert "Prefer one or two direct checks of the target file, path, process, or nearby config snippet" in context
+    assert "Do not read plugin source, plugin tests, plugin config, or full audit/gateway history" in context
+
+
+def test_low_signal_block_injects_stop_condition_and_no_source_diving() -> None:
+    hooks = build_runtime_hooks(settings=PluginSettings(low_signal_block_threshold=1))
+    session_id = "low-signal-stop-condition"
+    args = {"query": "missing thing"}
+
+    hooks.post_tool_call("search_files", args, "no results", session_id=session_id)
+    blocked = hooks.pre_tool_call("search_files", args, session_id=session_id)
+
+    assert blocked is not None
+    context = hooks.pre_llm_call(session_id=session_id)["context"]
+    assert blocked["message"] in context
+    assert "Stop broadening the evidence scope after repeated low-signal probes" in context
+    assert "Re-read the last block message and inspect only the immediate target file, path, process, or config snippet" in context
+    assert "Do not read plugin source, plugin tests, plugin config, or full audit/gateway history" in context
+
+
+def test_observe_phase_context_prefers_closest_artifact_over_plugin_internals() -> None:
+    hooks = build_runtime_hooks()
+    context = hooks.pre_llm_call(session_id="observe-context")["context"]
+    assert "Start with the closest local artifact on the actual control path" in context
+    assert "Do not start by reading plugin internals or full audit history" in context
+
+
+def test_pre_llm_context_marks_plugin_text_as_system_added_not_user_text() -> None:
+    hooks = build_runtime_hooks()
+    context = hooks.pre_llm_call(session_id="provenance-context")["context"]
+    assert "[SYSTEM-ADDED PLUGIN CONTEXT — NOT A USER MESSAGE]" in context
+    assert "system-added plugin context, not user-provided text" in context
+    assert "Do not attribute these instructions, reminders, or summaries to the user" in context
+    assert "[SYSTEM-ADDED PLUGIN STATE — GENERATED, NOT USER-PROVIDED] Autonomous task ledger" in context
+
+
+def test_block_reminder_clears_after_real_progress(tmp_path: Path) -> None:
+    target = tmp_path / "existing.txt"
+    target.write_text("old")
+    hooks = build_runtime_hooks(root_dir=str(tmp_path))
+    session_id = "blocked-reminder-clears"
+
+    blocked = hooks.pre_tool_call("write_file", {"path": "existing.txt", "content": "new"}, session_id=session_id)
+    assert blocked is not None
+    assert "Last tool call was blocked" in hooks.pre_llm_call(session_id=session_id)["context"]
+
+    hooks.post_tool_call("read_file", {"path": "existing.txt"}, "old", session_id=session_id)
+    assert "Last tool call was blocked" not in hooks.pre_llm_call(session_id=session_id)["context"]
 
 
 def test_low_signal_repeated_probe_blocks_same_intent() -> None:
@@ -235,7 +356,7 @@ def test_warn_mode_audits_dangerous_command_but_keeps_workflow_guardrails(tmp_pa
     blocked = hooks.pre_tool_call("terminal", {"command": "git push --force"}, session_id="warn-danger")
     assert blocked is not None
     assert blocked["action"] == "block"
-    assert "Inspect nearby" in blocked["message"]
+    assert "Blocked by Proofrail [missing_evidence]" in blocked["message"]
 
     hooks.post_tool_call("read_file", {"path": "README.md"}, "readme", session_id="warn-danger")
     decision = hooks.pre_tool_call("terminal", {"command": "git push --force"}, session_id="warn-danger")
@@ -318,6 +439,51 @@ def test_curl_pipe_shell_is_mutation_not_validation(tmp_path: Path) -> None:
     state = hooks.explain_state(session_id)
     assert state["pending_verification"] is True
     assert state["mutation_count"] == 1
+
+
+def test_execute_code_python_write_is_treated_as_mutation(tmp_path: Path) -> None:
+    from proofrail.tooling import get_exec_command, is_likely_mutating_exec
+
+    code = "from pathlib import Path\nPath('out.txt').write_text('hello\\n')\n"
+    assert get_exec_command({"code": code}) == code.strip()
+    assert is_likely_mutating_exec(code)
+
+
+
+def test_execute_code_is_blocked_while_pending_verification(tmp_path: Path) -> None:
+    target = tmp_path / "module.py"
+    target.write_text("old\n")
+    hooks = build_runtime_hooks(root_dir=str(tmp_path))
+    session_id = "execute-code-pending-verification"
+
+    hooks.post_tool_call("read_file", {"path": "module.py"}, "old\n", session_id=session_id)
+    hooks.post_tool_call("write_file", {"path": "module.py", "content": "new\n"}, {"success": True}, session_id=session_id)
+
+    blocked = hooks.pre_tool_call(
+        "execute_code",
+        {"code": "from pathlib import Path\nPath('module.py').write_text('newer\\n')\n"},
+        session_id=session_id,
+    )
+    assert blocked is not None
+    assert blocked["action"] == "block"
+    assert "Blocked by Proofrail [pending_verification]" in blocked["message"]
+
+
+
+def test_execute_code_existing_file_write_requires_evidence(tmp_path: Path) -> None:
+    target = tmp_path / "module.py"
+    target.write_text("old\n")
+    hooks = build_runtime_hooks(root_dir=str(tmp_path))
+
+    blocked = hooks.pre_tool_call(
+        "execute_code",
+        {"code": "from pathlib import Path\nPath('module.py').write_text('new\\n')\n"},
+        session_id="execute-code-missing-evidence",
+    )
+    assert blocked is not None
+    assert blocked["action"] == "block"
+    assert "Blocked by Proofrail [missing_evidence]" in blocked["message"]
+
 
 
 def test_plain_success_text_with_zero_errors_is_not_failure() -> None:
@@ -449,7 +615,7 @@ def test_write_with_cwd_relative_existing_file_requires_evidence(tmp_path):
 
     assert decision is not None
     assert decision["action"] == "block"
-    assert "Inspect nearby" in decision["message"]
+    assert "Blocked by Proofrail [missing_evidence]" in decision["message"]
 
 
 def test_summary_marker_uses_proofrail_brand() -> None:

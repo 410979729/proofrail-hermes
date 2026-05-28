@@ -38,8 +38,8 @@ def get_tool_category(tool_name: str, tool_aliases: Mapping[str, str] | None = N
 
 
 def get_exec_command(input_data: dict[str, object]) -> str:
-    """Return the shell command from common Hermes/agent tool argument shapes."""
-    for key in ("command", "cmd", "shell_command", "script", "input"):
+    """Return the shell command or code body from common Hermes tool argument shapes."""
+    for key in ("command", "cmd", "shell_command", "script", "input", "code"):
         value = input_data.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
@@ -58,24 +58,37 @@ def is_dangerous_command(command: str) -> tuple[bool, str | None]:
 
 def _looks_like_python_inline_write(command: str) -> bool:
     lowered = command.lower()
-    if "python" not in lowered or "open(" not in command:
-        return False
-    compact = lowered.replace('"', "'")
-    write_tokens = [
-        ",'w'",
-        ", 'w'",
-        ",'a'",
-        ", 'a'",
-        ",'x'",
-        ", 'x'",
-        ",'wb'",
-        ", 'wb'",
-        ",'ab'",
-        ", 'ab'",
-        ",'xb'",
-        ", 'xb'",
-    ]
-    return any(token in compact for token in write_tokens)
+    if "open(" in command:
+        compact = lowered.replace('"', "'")
+        write_tokens = [
+            ",'w'",
+            ", 'w'",
+            ",'a'",
+            ", 'a'",
+            ",'x'",
+            ", 'x'",
+            ",'wb'",
+            ", 'wb'",
+            ",'ab'",
+            ", 'ab'",
+            ",'xb'",
+            ", 'xb'",
+        ]
+        if any(token in compact for token in write_tokens):
+            return True
+    write_markers = (
+        ".write_text(",
+        ".write_bytes(",
+        ".writelines(",
+        ".write(",
+        ".open('w'",
+        '.open("w"',
+        ".open('a'",
+        '.open("a"',
+        ".open('x'",
+        '.open("x"',
+    )
+    return any(marker in lowered for marker in write_markers)
 
 
 def is_likely_mutating_exec(command: str) -> bool:

@@ -177,6 +177,9 @@ def record_tool_observation(
             state.evidence_labels = _merge_tuple(state.evidence_labels, [state.last_evidence_label])
             if not state.pending_verification:
                 state.phase = "execute"
+            if state.last_block_reason in {"missing_evidence", "low_signal_repeat"}:
+                state.last_block_message = None
+                state.last_block_reason = None
 
         if category == "write" or mutating_exec:
             state.pending_verification = True
@@ -195,6 +198,17 @@ def record_tool_observation(
             state.validation_labels = _merge_tuple(state.validation_labels, [state.last_validation_label])
             state.validation_suggestions = ()
             state.phase = "execute" if state.evidence_count > 0 else "observe"
+            if state.last_block_reason == "pending_verification":
+                state.last_block_message = None
+                state.last_block_reason = None
+
+    return STATE_STORE.update(session_id, apply)
+
+
+def record_block_decision(session_id: str, message: str, reason: str) -> SessionRuntimeState:
+    def apply(state: SessionRuntimeState) -> None:
+        state.last_block_message = message
+        state.last_block_reason = reason
 
     return STATE_STORE.update(session_id, apply)
 

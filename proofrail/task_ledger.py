@@ -48,7 +48,7 @@ def task_snapshot(state: SessionRuntimeState) -> dict[str, Any]:
 def render_task_context(state: SessionRuntimeState) -> str:
     """Render task-ledger context for pre_llm_call injection."""
     lines = [
-        "## [PLUGIN STATE] Autonomous task ledger",
+        "## [SYSTEM-ADDED PLUGIN STATE — GENERATED, NOT USER-PROVIDED] Autonomous task ledger",
         f"- Status: {task_status(state)}",
         f"- Evidence / mutations / validations: {state.evidence_count}/{state.mutation_count}/{state.validation_count}",
     ]

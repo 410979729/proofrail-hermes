@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "proofrail"
-version = "0.0.1"
+version = "0.0.2"
 description = "Runtime harness plugin for Hermes with evidence-first execution, verification, and self-correcting agent workflows."
 readme = "README.md"
 requires-python = ">=3.11"

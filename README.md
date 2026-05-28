@@ -36,11 +36,11 @@ For Hermes, that means a runtime plugin that can:
 
 ## Current status
 
-- Version: `v0.0.1`
+- Version: `v0.0.2`
 - Host: **Hermes Agent plugin hooks**
 - Language: **Python**
 
-> Version note: the GitHub release/tag line is `v0.0.1`, while the Python package and wheel version is `0.0.1` to follow PEP 440. They refer to the same release.
+> Version note: the GitHub release/tag line is `v0.0.2`, while the Python package and wheel version is `0.0.2` to follow PEP 440. They refer to the same release.
 
 ## Quick start
 
@@ -124,16 +124,19 @@ Core regression coverage currently includes:
 - low-signal probe blocking
 - large-output summarization
 - phase-aware `pre_llm_call` injection
+- explicit system-added / non-user provenance markers for injected plugin context
 - session end/finalize cleanup
 - audit log writing
 - touched-file and validation-hint injection
 - task ledger lifecycle
+- readback validation that clears `pending_verification` when the touched target is directly re-read
+- blocked-tool-call feedback reinjected into later reasoning context
 - summarize branding regression
 
 Run the local verification lane with:
 
 ```bash
-pytest -q tests/test_proofrail.py
+pytest -q tests/test_proofrail.py tests/test_readback_validation_regression.py
 rm -rf __pycache__ proofrail/__pycache__ tests/__pycache__ scripts/__pycache__ .pytest_cache
 python scripts/check.release.py
 python -m build --wheel

@@ -33,6 +33,8 @@ class SessionRuntimeState:
     validation_labels: tuple[str, ...] = ()
     dangerous_labels: tuple[str, ...] = ()
     final_report_required: bool = False
+    last_block_message: str | None = None
+    last_block_reason: str | None = None
     last_updated_at: float = 0.0
 
 

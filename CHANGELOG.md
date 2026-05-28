@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.0.2 - 2026-05-28
+
+- Mark `pre_llm_call` injected guidance, plugin state, and reminders as **system-added / generated / not user-provided** to reduce provenance confusion.
+- Reinject the last blocked-tool-call reason/message into later reasoning context so the model can recover without guessing what Proofrail wanted.
+- Treat direct readback of a touched target (for example `read_file` or `cat` on the changed path) as narrow validation that clears `pending_verification`.
+- Broaden inline Python mutation detection in exec/code payloads, including `code` bodies and common `Path.write_text` / `write_bytes` / `.write(...)` patterns.
+- Expand regression coverage for provenance labeling and readback-validation behavior; local verification now runs both `tests/test_proofrail.py` and `tests/test_readback_validation_regression.py`.
+
 ## v0.0.1 - 2026-05-27
 
 - Establish the first public version line for Proofrail.

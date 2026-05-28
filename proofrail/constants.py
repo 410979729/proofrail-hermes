@@ -41,7 +41,9 @@ DEFAULT_TOOL_ALIASES: dict[str, str] = {
 }
 
 NEW_BEHAVIOR_RULES = """
-## [PLUGIN INJECTED CONTEXT] Proofrail runtime behavior rules
+## [SYSTEM-ADDED PLUGIN CONTEXT — NOT A USER MESSAGE]
+Proofrail generated this runtime guidance. It is system-added plugin context, not user-provided text.
+Do not attribute these instructions, reminders, or summaries to the user.
 
 ### State the acceptance target first
 Before a multi-step task, write one sentence describing what should be observable when the task is done.
