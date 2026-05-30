@@ -8,6 +8,16 @@ from typing import Any, Literal
 SessionPhase = Literal["observe", "execute", "review"]
 DangerousCommandAction = Literal["approve", "block", "warn", "allow"]
 ToolCategoryName = Literal["read", "write", "exec", "search", "network", "other"]
+ClassifierDecisionName = Literal["allow", "warn", "ask_user", "block"]
+ClassifierEvidenceGapName = Literal[
+    "none",
+    "target_state",
+    "change_readback",
+    "narrow_validation",
+    "user_choice",
+    "strategy_shift",
+    "unclear",
+]
 
 
 @dataclass(slots=True)
@@ -35,6 +45,11 @@ class SessionRuntimeState:
     final_report_required: bool = False
     last_block_message: str | None = None
     last_block_reason: str | None = None
+    last_classifier_decision: ClassifierDecisionName | None = None
+    last_classifier_reason: str | None = None
+    last_classifier_evidence_gap: ClassifierEvidenceGapName | None = None
+    last_classifier_guidance: tuple[str, ...] = ()
+    last_classifier_source: str | None = None
     last_updated_at: float = 0.0
 
 
@@ -47,6 +62,9 @@ class PluginSettings:
     tool_aliases: dict[str, ToolCategoryName] = field(default_factory=dict)
     audit_enabled: bool = True
     audit_log_path: str | None = None
+    llm_classifier_enabled: bool = False
+    llm_classifier_provider: str | None = None
+    llm_classifier_model: str | None = None
 
 
 @dataclass(slots=True)

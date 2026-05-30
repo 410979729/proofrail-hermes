@@ -9,20 +9,37 @@ to review.
 from __future__ import annotations
 
 import logging
+import re
 import shlex
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 from .audit import AuditLogger, default_audit_log_path
-from .constants import NEW_BEHAVIOR_RULES, PLUGIN_NAME
+from .classifier import (
+    GuardrailClassifier,
+    GuardrailClassifierDecision,
+    HermesLlmGuardrailClassifier,
+    RuleBasedGrayAreaClassifier,
+    normalize_classifier_decision,
+    should_run_classifier,
+)
+from .constants import PLUGIN_NAME
 from .models import LlmContextResult, PluginSettings
 from .path_utils import mutates_existing_path
 from .result_status import get_tool_result_status
-from .session_state import STATE_STORE, build_tool_intent_signature, record_block_decision, record_dangerous_command, record_tool_observation
+from .session_state import (
+    STATE_STORE,
+    build_tool_intent_signature,
+    clear_classifier_decision,
+    record_block_decision,
+    record_classifier_decision,
+    record_dangerous_command,
+    record_tool_observation,
+)
 from .settings import root_dir_from_context, settings_from_context
 from .summarize import clamp_summary_threshold, summarize_large_output
-from .task_ledger import close_summary, final_review_checklist, render_task_context, task_snapshot
+from .task_ledger import close_summary, final_review_checklist, task_snapshot
 from .text_utils import compact_label, extract_text_from_tool_result
 from .tooling import get_exec_command, get_tool_category, is_dangerous_command, is_likely_mutating_exec, is_likely_validation_exec
 from .validation import changed_path_hints, suggest_validations
@@ -64,6 +81,9 @@ def _base_dir_for_tool_call(payload: dict[str, Any], root_dir: str | None) -> st
 def _normalize_path_hint(path_hint: str, base_dir: str | None) -> str | None:
     if not path_hint or path_hint.startswith(("http://", "https://")):
         return None
+    wrapper_match = re.fullmatch(r"(?:PosixPath|WindowsPath|Path)\((?P<quote>['\"])(?P<inner>.*?)(?P=quote)\)", path_hint)
+    if wrapper_match:
+        path_hint = wrapper_match.group("inner")
     try:
         path = Path(path_hint).expanduser()
         if not path.is_absolute():
@@ -124,6 +144,37 @@ def _readback_validates_touched_file(
     return _path_hints_overlap(touched_files, read_paths, base_dir)
 
 
+def _has_risk(state, low_signal_threshold: int) -> bool:
+    """Return True when blocked, pending_verification, low-signal, or classifier warning are active."""
+    if state.pending_verification:
+        return True
+    if state.last_block_message:
+        return True
+    if state.consecutive_low_signal >= low_signal_threshold:
+        return True
+    if state.last_classifier_decision and state.last_classifier_decision != "allow":
+        return True
+    return False
+
+
+def _compact_context(state) -> str:
+    """Short system-status context for clean observation/read-only scenarios."""
+    from .task_ledger import task_status
+
+    status = task_status(state)
+    lines = [
+        "## [SYSTEM STATUS — not user input]",
+        f"- Phase: {state.phase} | task: {status}",
+    ]
+    if state.evidence_count == 0:
+        lines.append("- Next: inspect the closest code, config, log, or test on the control path.")
+    elif state.mutation_count == 0:
+        lines.append("- Next: make the smallest explainable change, then validate it immediately.")
+    else:
+        lines.append("- Next: report root cause, changes, validation, evidence, and remaining risks.")
+    return "\n".join(lines)
+
+
 class RuntimeHooks:
     """Stateful hook implementation registered by ``register(ctx)``.
 
@@ -132,9 +183,16 @@ class RuntimeHooks:
     a JSONL audit trail for later review.
     """
 
-    def __init__(self, settings: PluginSettings | None = None, *, root_dir: str | None = None) -> None:
+    def __init__(
+        self,
+        settings: PluginSettings | None = None,
+        *,
+        root_dir: str | None = None,
+        classifier: GuardrailClassifier | None = None,
+    ) -> None:
         self.settings = settings or PluginSettings()
         self.root_dir = root_dir
+        self.classifier = classifier
         audit_path = self.settings.audit_log_path or default_audit_log_path(root_dir)
         self.audit = AuditLogger(audit_path, enabled=self.settings.audit_enabled)
 
@@ -176,6 +234,11 @@ class RuntimeHooks:
             "validation_labels": list(state.validation_labels),
             "dangerous_labels": list(state.dangerous_labels),
             "final_report_required": state.final_report_required,
+            "last_classifier_decision": state.last_classifier_decision,
+            "last_classifier_reason": state.last_classifier_reason,
+            "last_classifier_evidence_gap": state.last_classifier_evidence_gap,
+            "last_classifier_guidance": list(state.last_classifier_guidance),
+            "last_classifier_source": state.last_classifier_source,
             "task": task_snapshot(state),
             "next_expected": next_expected,
             "audit_log_path": str(self.audit.path) if self.audit.path else None,
@@ -260,6 +323,7 @@ class RuntimeHooks:
                 "Blocked by Proofrail [pending_verification].\n"
                 f"Target: {target_label}\n"
                 f"Recommended next step: validate {target_label} directly before attempting another mutation.\n"
+                "Accepted validation shapes: read back the touched path directly, or run a narrow validation command against the same touched path/process.\n"
                 f"Enough when: you confirm the last mutation landed as intended ({state.last_mutation_label or 'recent mutation'}).\n"
                 "Do not: stack another mutation, inspect plugin internals, or search for alternate mutation paths."
             )
@@ -279,6 +343,57 @@ class RuntimeHooks:
 
         if state.consecutive_low_signal >= self.settings.low_signal_block_threshold and state.last_low_signal_intent == tool_intent:
             return self._blocked(session_id, tool_name, payload, "Recent tool calls produced no new facts. Switch paths, keywords, log sources, hosts, or validation methods.", reason="low_signal_repeat")
+
+        clear_classifier_decision(session_id)
+        classifier = self.classifier
+        if classifier is None and self.settings.llm_classifier_enabled:
+            classifier = RuleBasedGrayAreaClassifier()
+        if classifier is not None and should_run_classifier(
+            session_state=state,
+            category=category,
+            is_mutation=is_mutation,
+            mutating_exec=mutating_exec,
+            mutation_touches_existing_path=mutation_touches_existing_path,
+        ):
+            decision = normalize_classifier_decision(
+                classifier(
+                    tool_name=tool_name,
+                    args=payload,
+                    session_state=state,
+                    command=command,
+                    category=category,
+                    is_mutation=is_mutation,
+                )
+            )
+            if decision is not None:
+                record_classifier_decision(
+                    session_id,
+                    decision=decision.decision,
+                    reason=decision.reason,
+                    evidence_gap=decision.evidence_gap,
+                    guidance=decision.guidance,
+                    source=decision.source,
+                )
+                self.audit.record(
+                    "classifier_decision",
+                    session_id=session_id or "default",
+                    tool_name=tool_name,
+                    decision=decision.decision,
+                    evidence_gap=decision.evidence_gap,
+                    source=decision.source,
+                    reason=decision.reason,
+                    guidance=list(decision.guidance),
+                )
+                if decision.decision == "block":
+                    guidance = "\n".join(f"- {item}" for item in decision.guidance)
+                    message = (
+                        "Blocked by Proofrail [llm_classifier].\n"
+                        f"Reason: {decision.reason or 'Gray-area mutation rejected by classifier.'}\n"
+                        f"Evidence gap: {decision.evidence_gap}"
+                    )
+                    if guidance:
+                        message += f"\nRecommended next step(s):\n{guidance}"
+                    return self._blocked(session_id, tool_name, payload, message, reason="llm_classifier")
 
         self.audit.record(
             "tool_preflight",
@@ -374,64 +489,95 @@ class RuntimeHooks:
         return None
 
     def pre_llm_call(self, session_id: str = "", **_: Any) -> dict[str, str]:
-        """Inject workflow rules, task-ledger state, and validation reminders."""
+        """Inject compact workflow state and next-step reminders."""
         state = STATE_STORE.snapshot(session_id)
-        extra = NEW_BEHAVIOR_RULES
-        if state.phase == "observe":
-            extra += (
-                "\n\n## [SYSTEM-ADDED PLUGIN STATE — GENERATED, NOT USER-PROVIDED] Current phase: Observe\n"
-                "There is not enough local evidence yet. Inspect code, config, logs, tests, or health probes on the control path before mutating existing files or processes.\n"
-                "- Start with the closest local artifact on the actual control path (the target file, target path, target process, or the nearest config/log snippet).\n"
-                "- Do not start by reading plugin internals or full audit history.\n"
+
+        if _has_risk(state, self.settings.low_signal_block_threshold):
+            from .task_ledger import task_status
+
+            status = task_status(state)
+            extra = (
+                "## [SYSTEM STATUS — not user input]\n"
+                f"- Phase: {state.phase} | task: {status}"
             )
-        elif state.phase == "execute":
-            suffix = f" (latest: {state.last_evidence_label})" if state.last_evidence_label else ""
-            extra += f"\n\n## [SYSTEM-ADDED PLUGIN STATE — GENERATED, NOT USER-PROVIDED] Current phase: Execute\nLocal evidence has been gathered{suffix}. Keep the next change minimal and stay close to the control path."
-        elif state.phase == "review":
-            extra += f"\n\n## [SYSTEM-ADDED PLUGIN STATE — GENERATED, NOT USER-PROVIDED] Current phase: Review\nA recent change was made ({state.last_mutation_label or 'recent mutation'}). Run the narrowest validation before expanding the change set."
-        extra += "\n\n" + render_task_context(state)
-        if state.pending_verification:
-            extra += f"\n\n## [SYSTEM-ADDED PLUGIN REMINDER — GENERATED, NOT USER-PROVIDED] ⚠️ Validate before continuing\nA file, config, or process change just happened ({state.last_mutation_label or 'recent mutation'}). Run the narrowest validation next instead of stacking more changes."
-        if state.validation_suggestions:
-            suggestions = "\n".join(f"- {item}" for item in state.validation_suggestions)
-            extra += f"\n\n## [SYSTEM-ADDED PLUGIN REMINDER — GENERATED, NOT USER-PROVIDED] Suggested narrow validation\n{suggestions}"
-        if state.touched_files:
-            touched = "\n".join(f"- {item}" for item in state.touched_files)
-            extra += f"\n\n## [SYSTEM-ADDED PLUGIN STATE — GENERATED, NOT USER-PROVIDED] Touched files / paths in this session\n{touched}"
-        if state.dangerous_count:
-            extra += f"\n\n## [SYSTEM-ADDED PLUGIN STATE — GENERATED, NOT USER-PROVIDED] ⚠️ High-risk command audit\nObserved {state.dangerous_count} high-risk command(s) in this session (latest: {state.last_dangerous_label}). If autonomous execution continues, validate the effects and explain the risk in the final report."
-        checklist = final_review_checklist(state)
-        if checklist:
-            extra += "\n\n## [SYSTEM-ADDED PLUGIN REMINDER — GENERATED, NOT USER-PROVIDED] Final report requirements / checklist\n" + "\n".join(f"- {item}" for item in checklist)
-        if state.consecutive_low_signal >= self.settings.low_signal_block_threshold:
-            extra += f"\n\n## [SYSTEM-ADDED PLUGIN REMINDER — GENERATED, NOT USER-PROVIDED] ⚠️ Switch probes now\nThe last {state.consecutive_low_signal} tool calls produced no new facts. Do not repeat the same command or search layer unchanged; switch logs, paths, keywords, hosts, sources, or upstream docs."
-        if state.last_block_message:
-            extra += (
-                "\n\n## [SYSTEM-ADDED PLUGIN REMINDER — GENERATED, NOT USER-PROVIDED] Last tool call was blocked\n"
-                f"- Block reason: `{state.last_block_reason or 'blocked'}`\n"
-                f"- Block message: {state.last_block_message}\n"
-                "- Treat the block message as the required next step, not as an obstacle to route around.\n"
-                "- Do not look for alternate tools, wrapper tools, or equivalent mutations that achieve the same blocked outcome.\n"
-            )
-            if state.last_block_reason == "pending_verification":
+            if state.phase == "observe":
+                extra += "\n- Do not start by reading plugin internals or full audit history."
+            elif state.phase == "execute":
+                suffix = f" (latest evidence: {state.last_evidence_label})" if state.last_evidence_label else ""
+                extra += f"\n- Keep the next change minimal and stay on the same control path.{suffix}"
+            elif state.phase == "review":
                 extra += (
-                    "- Validate the last mutation before any more changes.\n"
-                    "- The next step is validation of the touched path/process, not more mutation planning.\n"
-                    "- Do not inspect plugin source or search for alternate mutation paths.\n"
+                    f"\n- A recent change was made ({state.last_mutation_label or 'recent mutation'}). "
+                    "Validate before expanding the change set."
                 )
-            elif state.last_block_reason == "missing_evidence":
+            if state.pending_verification:
                 extra += (
-                    "- Gather local evidence on the same control path before retrying the mutation.\n"
-                    "- Prefer one or two direct checks of the target file, path, process, or nearby config snippet.\n"
-                    "- Do not read plugin source, plugin tests, plugin config, or full audit/gateway history.\n"
+                    "\n\n## [SYSTEM STATUS — validation required]\n"
+                    f"- Validate next: {state.last_mutation_label or 'recent mutation'}\n"
+                    "- Do not stack more changes before this validation."
                 )
-            elif state.last_block_reason == "low_signal_repeat":
+            if state.validation_suggestions:
+                suggestions = "\n".join(f"- {item}" for item in state.validation_suggestions)
+                extra += f"\n\n## [SYSTEM STATUS — Suggested narrow validation]\n{suggestions}"
+            if state.touched_files:
+                touched = "\n".join(f"- {item}" for item in state.touched_files)
+                extra += f"\n\n## [SYSTEM STATUS — touched paths]\n{touched}"
+            if state.dangerous_count:
                 extra += (
-                    "- Change probe strategy instead of retrying the same intent through another tool.\n"
-                    "- Stop broadening the evidence scope after repeated low-signal probes.\n"
-                    "- Re-read the last block message and inspect only the immediate target file, path, process, or config snippet.\n"
-                    "- Do not read plugin source, plugin tests, plugin config, or full audit/gateway history.\n"
+                    "\n\n## [SYSTEM STATUS — high-risk command audit]\n"
+                    f"- Observed: {state.dangerous_count}\n"
+                    f"- Latest: {state.last_dangerous_label}\n"
+                    "- If execution continues, validate the effects and mention the risk in the final report."
                 )
+            checklist = final_review_checklist(state)
+            if checklist:
+                extra += "\n\n## [SYSTEM STATUS — Final report requirements]\n" + "\n".join(f"- {item}" for item in checklist)
+            if state.consecutive_low_signal >= self.settings.low_signal_block_threshold:
+                extra += (
+                    "\n\n## [SYSTEM STATUS — low-signal warning]\n"
+                    f"- Recent low-signal count: {state.consecutive_low_signal}\n"
+                    "- Switch logs, paths, keywords, hosts, sources, or validation method instead of repeating the same probe."
+                )
+            if state.last_block_message:
+                extra += (
+                    "\n\n## [SYSTEM STATUS — last block]\n"
+                    "- Last tool call was blocked.\n"
+                    f"- Reason: `{state.last_block_reason or 'blocked'}`\n"
+                    f"- Message: {state.last_block_message}\n"
+                    "- Treat the block message as the required next step, not as an obstacle to route around.\n"
+                    "- Do not look for alternate tools, wrapper tools, or equivalent mutations that achieve the same blocked outcome.\n"
+                )
+                if state.last_block_reason == "pending_verification":
+                    extra += (
+                        "- Validate the last mutation before any more changes.\n"
+                        "- The next step is validation of the touched path/process, not more mutation planning.\n"
+                        "- Do not inspect plugin source or search for alternate mutation paths.\n"
+                    )
+                elif state.last_block_reason == "missing_evidence":
+                    extra += (
+                        "- Gather local evidence on the same control path before retrying the mutation.\n"
+                        "- Prefer one or two direct checks of the target file, path, process, or nearby config snippet.\n"
+                        "- Do not read plugin source, plugin tests, plugin config, or full audit/gateway history.\n"
+                    )
+                elif state.last_block_reason == "low_signal_repeat":
+                    extra += (
+                        "- Change probe strategy instead of retrying the same intent through another tool.\n"
+                        "- Stop broadening the evidence scope after repeated low-signal probes.\n"
+                        "- Re-read the last block message and inspect only the immediate target file, path, process, or config snippet.\n"
+                        "- Do not read plugin source, plugin tests, plugin config, or full audit/gateway history.\n"
+                    )
+            if state.last_classifier_decision and state.last_classifier_decision != "allow":
+                extra += (
+                    "\n\n## [SYSTEM STATUS — LLM classifier review]\n"
+                    f"- Decision: `{state.last_classifier_decision}`\n"
+                    f"- Evidence gap: `{state.last_classifier_evidence_gap or 'unclear'}`\n"
+                    f"- Reason: {state.last_classifier_reason or 'No reason provided.'}"
+                )
+                if state.last_classifier_guidance:
+                    extra += "\n- Guidance:\n" + "\n".join(f"  - {item}" for item in state.last_classifier_guidance)
+        else:
+            extra = _compact_context(state)
+
         return asdict(LlmContextResult(context=extra))
 
     def _blocked(self, session_id: str, tool_name: str, args: dict[str, Any], message: str, *, reason: str) -> HookDecision:
@@ -441,14 +587,31 @@ class RuntimeHooks:
         return decision
 
 
-def build_runtime_hooks(settings: PluginSettings | None = None, *, root_dir: str | None = None) -> RuntimeHooks:
+def build_runtime_hooks(
+    settings: PluginSettings | None = None,
+    *,
+    root_dir: str | None = None,
+    classifier: GuardrailClassifier | None = None,
+) -> RuntimeHooks:
     """Factory used by tests and Hermes registration."""
-    return RuntimeHooks(settings=settings, root_dir=root_dir)
+    return RuntimeHooks(settings=settings, root_dir=root_dir, classifier=classifier)
 
 
 def register(ctx: Any) -> None:
     """Hermes plugin entrypoint. Registers all runtime hooks on the host ctx."""
-    hooks = build_runtime_hooks(settings=settings_from_context(ctx), root_dir=root_dir_from_context(ctx))
+    settings = settings_from_context(ctx)
+    classifier: GuardrailClassifier | None = None
+    if settings.llm_classifier_enabled and getattr(ctx, "llm", None) is not None:
+        classifier = HermesLlmGuardrailClassifier(
+            llm=ctx.llm,
+            provider=settings.llm_classifier_provider,
+            model=settings.llm_classifier_model,
+        )
+    hooks = build_runtime_hooks(
+        settings=settings,
+        root_dir=root_dir_from_context(ctx),
+        classifier=classifier,
+    )
     ctx.register_hook("on_session_start", hooks.on_session_start)
     ctx.register_hook("pre_tool_call", hooks.pre_tool_call)
     ctx.register_hook("post_tool_call", hooks.post_tool_call)

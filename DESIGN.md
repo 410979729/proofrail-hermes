@@ -142,9 +142,9 @@ Responsibilities:
 - inject phase summaries and runtime reminders
 - append context rather than rewriting the system prompt
 
-## Current v0.0.1 autonomous harness layer
+## Current v0.0.3 autonomous harness layer
 
-v0.0.1 currently includes:
+v0.0.3 currently includes:
 
 1. default `dangerous_command_action=warn`; high-risk commands stay out of a manual approval loop, but they are audited and paired with self-verification reminders
 2. a JSONL audit trail for session lifecycle, tool preflight, dangerous commands, tool results, and large-output summarization
@@ -155,8 +155,8 @@ v0.0.1 currently includes:
 
 ## Version semantics
 
-- GitHub release/tag line: `v0.0.1`
-- Python package version: `0.0.1`
+- GitHub release/tag line: `v0.0.3`
+- Python package version: `0.0.3`
 
 This split is intentional: GitHub tags keep the leading `v`, while Python packaging follows PEP 440.
 

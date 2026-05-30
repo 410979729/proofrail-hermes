@@ -36,11 +36,11 @@ For Hermes, that means a runtime plugin that can:
 
 ## Current status
 
-- Version: `v0.0.2`
+- Version: `v0.0.3`
 - Host: **Hermes Agent plugin hooks**
 - Language: **Python**
 
-> Version note: the GitHub release/tag line is `v0.0.2`, while the Python package and wheel version is `0.0.2` to follow PEP 440. They refer to the same release.
+> Version note: the GitHub release/tag line is `v0.0.3`, while the Python package and wheel version is `0.0.3` to follow PEP 440. They refer to the same release.
 
 ## Quick start
 
@@ -100,12 +100,21 @@ plugins:
       low_signal_block_threshold: 2
       audit_enabled: true
       audit_log_path: .proofrail/audit.jsonl
+      llm_classifier_enabled: true
+      # Leave provider/model unset to inherit the instance's current main model.
+      llm_classifier_provider: null
+      llm_classifier_model: null
       tool_aliases:
         shell: exec
         run_command: exec
         edit_file: write
         apply_patch: write
 ```
+
+`llm_classifier_enabled: true` turns on the gray-area classifier path.
+
+- Leave `llm_classifier_provider` and `llm_classifier_model` unset (or `null`) if you want the classifier to follow the instance's current main model automatically.
+- Set both fields if you want the classifier to use a dedicated provider/model pair.
 
 Supported tool categories are: `read`, `write`, `exec`, `search`, `network`, and `other`. See `docs/configuration.md` for details.
 

@@ -160,6 +160,9 @@ def settings_from_mapping(config: Mapping[str, Any] | None) -> PluginSettings:
         tool_aliases=_coerce_tool_aliases(raw.get("tool_aliases")),
         audit_enabled=_coerce_bool(raw.get("audit_enabled"), default=True),
         audit_log_path=_coerce_optional_str(raw.get("audit_log_path")),
+        llm_classifier_enabled=_coerce_bool(raw.get("llm_classifier_enabled"), default=False),
+        llm_classifier_provider=_coerce_optional_str(raw.get("llm_classifier_provider")),
+        llm_classifier_model=_coerce_optional_str(raw.get("llm_classifier_model")),
     )
 
 

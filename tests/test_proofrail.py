@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from proofrail import build_runtime_hooks, register
+from proofrail.classifier import HermesLlmGuardrailClassifier
 from proofrail.models import PluginSettings
 from proofrail.result_status import get_tool_result_status
 from proofrail.settings import settings_from_mapping
@@ -13,10 +14,11 @@ from proofrail.tooling import get_exec_command, get_tool_category, is_dangerous_
 
 
 class FakeCtx:
-    def __init__(self, root_dir: str | None = None, config: dict | None = None) -> None:
+    def __init__(self, root_dir: str | None = None, config: dict | None = None, llm=None) -> None:
         self.root_dir = root_dir
         self.config = config or {}
         self.hooks: dict[str, object] = {}
+        self.llm = llm
 
     def register_hook(self, name: str, hook) -> None:
         self.hooks[name] = hook
@@ -66,6 +68,108 @@ def test_register_reads_plugin_settings_from_hermes_style_config(tmp_path: Path)
     assert "manual confirmation" in decision["message"]
 
 
+def test_register_auto_wires_llm_classifier_with_active_model_defaults(tmp_path: Path) -> None:
+    calls: list[dict] = []
+
+    class FakeStructuredResult:
+        def __init__(self, parsed):
+            self.parsed = parsed
+            self.text = ""
+            self.provider = "copilot"
+            self.model = "gpt-5.4"
+            self.agent_id = "default"
+            self.audit = {}
+
+    class FakeLlm:
+        def complete_structured(self, **kwargs):
+            calls.append(kwargs)
+            return FakeStructuredResult(
+                {
+                    "decision": "warn",
+                    "reason": "Keep the next change narrow.",
+                    "evidence_gap": "narrow_validation",
+                    "guidance": ["Validate immediately after the change."],
+                }
+            )
+
+    target = tmp_path / "module.py"
+    target.write_text("print('old')\n")
+    ctx = FakeCtx(
+        str(tmp_path),
+        {"plugins": {"entries": {"proofrail": {"llm_classifier_enabled": True}}}},
+        llm=FakeLlm(),
+    )
+    register(ctx)
+    post_tool_call = ctx.hooks["post_tool_call"]
+    pre_tool_call = ctx.hooks["pre_tool_call"]
+    post_tool_call("read_file", {"path": "module.py"}, "print('old')\n", session_id="auto-llm-default")
+    decision = pre_tool_call(
+        "write_file",
+        {"path": "module.py", "content": "print('new')\n"},
+        session_id="auto-llm-default",
+    )
+    assert decision is None
+    assert calls
+    assert calls[0].get("provider") is None
+    assert calls[0].get("model") is None
+
+
+def test_register_auto_wires_llm_classifier_with_override_model(tmp_path: Path) -> None:
+    calls: list[dict] = []
+
+    class FakeStructuredResult:
+        def __init__(self, parsed):
+            self.parsed = parsed
+            self.text = ""
+            self.provider = "openrouter"
+            self.model = "openai/gpt-4.1-mini"
+            self.agent_id = "default"
+            self.audit = {}
+
+    class FakeLlm:
+        def complete_structured(self, **kwargs):
+            calls.append(kwargs)
+            return FakeStructuredResult(
+                {
+                    "decision": "allow",
+                    "reason": "",
+                    "evidence_gap": "none",
+                    "guidance": [],
+                }
+            )
+
+    target = tmp_path / "module.py"
+    target.write_text("print('old')\n")
+    ctx = FakeCtx(
+        str(tmp_path),
+        {
+            "plugins": {
+                "entries": {
+                    "proofrail": {
+                        "llm_classifier_enabled": True,
+                        "llm_classifier_provider": "openrouter",
+                        "llm_classifier_model": "openai/gpt-4.1-mini",
+                    }
+                }
+            }
+        },
+        llm=FakeLlm(),
+    )
+    register(ctx)
+    post_tool_call = ctx.hooks["post_tool_call"]
+    pre_tool_call = ctx.hooks["pre_tool_call"]
+    post_tool_call("read_file", {"path": "module.py"}, "print('old')\n", session_id="auto-llm-override")
+    decision = pre_tool_call(
+        "write_file",
+        {"path": "module.py", "content": "print('new')\n"},
+        session_id="auto-llm-override",
+    )
+    assert decision is None
+    assert calls
+    assert calls[0]["provider"] == "openrouter"
+    assert calls[0]["model"] == "openai/gpt-4.1-mini"
+
+
 def test_settings_mapping_is_sanitized() -> None:
     settings = settings_from_mapping(
         {
@@ -79,6 +183,22 @@ def test_settings_mapping_is_sanitized() -> None:
     assert settings.summary_threshold_chars == 1000
     assert settings.low_signal_block_threshold == 1
     assert settings.tool_aliases == {"shell": "exec"}
+    assert settings.llm_classifier_enabled is False
+    assert settings.llm_classifier_provider is None
+    assert settings.llm_classifier_model is None
+
+
+def test_settings_mapping_reads_llm_classifier_override() -> None:
+    settings = settings_from_mapping(
+        {
+            "llm_classifier_enabled": True,
+            "llm_classifier_provider": "openrouter",
+            "llm_classifier_model": "openai/gpt-4.1-mini",
+        }
+    )
+    assert settings.llm_classifier_enabled is True
+    assert settings.llm_classifier_provider == "openrouter"
+    assert settings.llm_classifier_model == "openai/gpt-4.1-mini"
 
 
 def test_tool_aliases_can_extend_categories() -> None:
@@ -250,17 +370,14 @@ def test_low_signal_block_injects_stop_condition_and_no_source_diving() -> None:
 def test_observe_phase_context_prefers_closest_artifact_over_plugin_internals() -> None:
     hooks = build_runtime_hooks()
     context = hooks.pre_llm_call(session_id="observe-context")["context"]
-    assert "Start with the closest local artifact on the actual control path" in context
-    assert "Do not start by reading plugin internals or full audit history" in context
+    assert "inspect the closest code, config, log, or test on the control path" in context
 
 
 def test_pre_llm_context_marks_plugin_text_as_system_added_not_user_text() -> None:
     hooks = build_runtime_hooks()
     context = hooks.pre_llm_call(session_id="provenance-context")["context"]
-    assert "[SYSTEM-ADDED PLUGIN CONTEXT — NOT A USER MESSAGE]" in context
-    assert "system-added plugin context, not user-provided text" in context
-    assert "Do not attribute these instructions, reminders, or summaries to the user" in context
-    assert "[SYSTEM-ADDED PLUGIN STATE — GENERATED, NOT USER-PROVIDED] Autonomous task ledger" in context
+    assert "[SYSTEM STATUS — not user input]" in context
+    assert "Phase: observe | task: needs_evidence" in context
 
 
 def test_block_reminder_clears_after_real_progress(tmp_path: Path) -> None:
@@ -367,6 +484,107 @@ def test_warn_mode_audits_dangerous_command_but_keeps_workflow_guardrails(tmp_pa
     assert "git push --force" in text
 
 
+def test_llm_classifier_can_block_gray_area_mutation(tmp_path: Path) -> None:
+    from proofrail.classifier import GuardrailClassifierDecision
+
+    target = tmp_path / "module.py"
+    target.write_text("print('old')\n")
+    calls: list[tuple[str, str]] = []
+
+    def fake_classifier(*, tool_name: str, session_state, args, **_kwargs):
+        calls.append((tool_name, session_state.phase))
+        return GuardrailClassifierDecision(
+            decision="block",
+            reason="Current evidence is still too broad; inspect the target file directly before editing.",
+            evidence_gap="target_state",
+            guidance=("Inspect the target file directly before editing.",),
+            source="test",
+        )
+
+    hooks = build_runtime_hooks(root_dir=str(tmp_path), classifier=fake_classifier)
+    session_id = "classifier-gray-block"
+    hooks.post_tool_call("search_files", {"query": "module"}, "module.py", session_id=session_id)
+
+    blocked = hooks.pre_tool_call(
+        "write_file",
+        {"path": "module.py", "content": "print('new')\n"},
+        session_id=session_id,
+    )
+
+    assert blocked is not None
+    assert blocked["action"] == "block"
+    assert "Blocked by Proofrail [llm_classifier]" in blocked["message"]
+    assert "inspect the target file directly" in blocked["message"].lower()
+    assert calls == [("write_file", "execute")]
+
+
+def test_llm_classifier_does_not_override_hard_missing_evidence_block(tmp_path: Path) -> None:
+    from proofrail.classifier import GuardrailClassifierDecision
+
+    target = tmp_path / "module.py"
+    target.write_text("print('old')\n")
+    called = False
+
+    def fake_classifier(**_kwargs):
+        nonlocal called
+        called = True
+        return GuardrailClassifierDecision(
+            decision="allow",
+            reason="",
+            evidence_gap="none",
+            guidance=(),
+            source="test",
+        )
+
+    hooks = build_runtime_hooks(root_dir=str(tmp_path), classifier=fake_classifier)
+    blocked = hooks.pre_tool_call(
+        "write_file",
+        {"path": "module.py", "content": "print('new')\n"},
+        session_id="classifier-hard-block-precedence",
+    )
+
+    assert blocked is not None
+    assert blocked["action"] == "block"
+    assert "Blocked by Proofrail [missing_evidence]" in blocked["message"]
+    assert called is False
+
+
+def test_llm_classifier_warning_is_injected_into_context(tmp_path: Path) -> None:
+    from proofrail.classifier import GuardrailClassifierDecision
+
+    target = tmp_path / "module.py"
+    target.write_text("print('old')\n")
+
+    def fake_classifier(**_kwargs):
+        return GuardrailClassifierDecision(
+            decision="warn",
+            reason="Evidence exists, but the next change should stay narrow and target-focused.",
+            evidence_gap="narrow_validation",
+            guidance=(
+                "Keep the next change minimal.",
+                "Validate immediately after the change.",
+            ),
+            source="test",
+        )
+
+    hooks = build_runtime_hooks(root_dir=str(tmp_path), classifier=fake_classifier)
+    session_id = "classifier-warning-context"
+    hooks.post_tool_call("read_file", {"path": "module.py"}, "print('old')\n", session_id=session_id)
+
+    decision = hooks.pre_tool_call(
+        "write_file",
+        {"path": "module.py", "content": "print('new')\n"},
+        session_id=session_id,
+    )
+    assert decision is None
+
+    context = hooks.pre_llm_call(session_id=session_id)["context"]
+    assert "LLM classifier review" in context
+    assert "narrow_validation" in context
+    assert "Keep the next change minimal." in context
+    assert "Validate immediately after the change." in context
+
+
 def test_mutation_records_validation_suggestions_in_context(tmp_path: Path) -> None:
     target = tmp_path / "module.py"
     target.write_text("print('old')")
@@ -396,6 +614,131 @@ def test_validation_success_updates_review_state(tmp_path: Path) -> None:
     assert state["pending_verification"] is False
     assert state["validation_count"] == 1
     assert state["validation_suggestions"] == []
+
+
+def test_py_compile_validation_clears_pending_verification_for_python_file(tmp_path: Path) -> None:
+    target = tmp_path / "module.py"
+    target.write_text("print('old')\n")
+    hooks = build_runtime_hooks(root_dir=str(tmp_path))
+    session_id = "py-compile-clears"
+
+    hooks.post_tool_call("read_file", {"path": str(target)}, "print('old')\n", session_id=session_id)
+    hooks.post_tool_call("write_file", {"path": str(target), "content": "print('new')\n"}, {"success": True}, session_id=session_id)
+    assert hooks.explain_state(session_id)["pending_verification"] is True
+
+    hooks.post_tool_call(
+        "terminal",
+        {"command": f"python -m py_compile {target}"},
+        {"exit_code": 0, "stdout": ""},
+        session_id=session_id,
+    )
+    state = hooks.explain_state(session_id)
+    assert state["pending_verification"] is False
+    assert state["validation_count"] == 1
+
+
+def test_readback_validation_on_touched_file_clears_pending_verification(tmp_path: Path) -> None:
+    target = tmp_path / "proofrail.plugin.py"
+    target.write_text("print('old')\n")
+    hooks = build_runtime_hooks(root_dir=str(tmp_path))
+    session_id = "readback-clears-pending"
+
+    hooks.post_tool_call("read_file", {"path": str(target)}, "print('old')\n", session_id=session_id)
+    hooks.post_tool_call("patch", {"path": str(target), "old_string": "old", "new_string": "new"}, {"success": True}, session_id=session_id)
+    assert hooks.explain_state(session_id)["pending_verification"] is True
+
+    hooks.post_tool_call("read_file", {"path": str(target)}, "print('new')\n", session_id=session_id)
+    state = hooks.explain_state(session_id)
+    assert state["pending_verification"] is False
+    assert state["validation_count"] == 1
+    assert state["last_validation_label"] == f"read_file: {target}"
+
+
+def test_unrelated_readback_does_not_clear_pending_verification(tmp_path: Path) -> None:
+    target = tmp_path / "proofrail.plugin.py"
+    other = tmp_path / "other.py"
+    target.write_text("print('old')\n")
+    other.write_text("print('other')\n")
+    hooks = build_runtime_hooks(root_dir=str(tmp_path))
+    session_id = "unrelated-readback-stays-pending"
+
+    hooks.post_tool_call("read_file", {"path": str(target)}, "print('old')\n", session_id=session_id)
+    hooks.post_tool_call("patch", {"path": str(target), "old_string": "old", "new_string": "new"}, {"success": True}, session_id=session_id)
+    assert hooks.explain_state(session_id)["pending_verification"] is True
+
+    hooks.post_tool_call("read_file", {"path": str(other)}, "print('other')\n", session_id=session_id)
+    state = hooks.explain_state(session_id)
+    assert state["pending_verification"] is True
+    assert state["validation_count"] == 0
+
+
+def test_readback_validation_accepts_path_wrapper_hints(tmp_path: Path) -> None:
+    target = tmp_path / "proofrail.plugin.py"
+    target.write_text("print('old')\n")
+    hooks = build_runtime_hooks(root_dir=str(tmp_path))
+    session_id = "path-wrapper-readback-clears"
+
+    hooks.post_tool_call("read_file", {"path": str(target)}, "print('old')\n", session_id=session_id)
+    hooks.post_tool_call("patch", {"path": str(target), "old_string": "old", "new_string": "new"}, {"success": True}, session_id=session_id)
+
+    from proofrail.session_state import STATE_STORE
+    STATE_STORE._states[session_id].touched_files = (f"Path({str(target)!r})",)
+    state_before = hooks.explain_state(session_id)
+    assert state_before["pending_verification"] is True
+
+    hooks.post_tool_call("read_file", {"path": str(target)}, "print('new')\n", session_id=session_id)
+    state = hooks.explain_state(session_id)
+    assert state["pending_verification"] is False
+    assert state["validation_count"] == 1
+
+
+def test_pending_verification_block_message_explains_specific_validation_shapes(tmp_path: Path) -> None:
+    target = tmp_path / "proofrail.plugin.py"
+    target.write_text("print('old')\n")
+    hooks = build_runtime_hooks(root_dir=str(tmp_path))
+    session_id = "pending-verification-message-shape"
+
+    hooks.post_tool_call("read_file", {"path": str(target)}, "print('old')\n", session_id=session_id)
+    hooks.post_tool_call("patch", {"path": str(target), "old_string": "old", "new_string": "new"}, {"success": True}, session_id=session_id)
+
+    blocked = hooks.pre_tool_call("write_file", {"path": str(target), "content": "print('newer')\n"}, session_id=session_id)
+    assert blocked is not None
+    assert "Blocked by Proofrail [pending_verification]" in blocked["message"]
+    assert "read back the touched path directly" in blocked["message"]
+    assert "validation command" in blocked["message"]
+    assert "same touched path/process" in blocked["message"]
+
+
+def test_deterministic_pending_verification_block_prevents_classifier_guidance(tmp_path: Path) -> None:
+    from proofrail.classifier import GuardrailClassifierDecision
+
+    target = tmp_path / "proofrail.plugin.py"
+    target.write_text("print('old')\n")
+    called = False
+
+    def fake_classifier(**_kwargs):
+        nonlocal called
+        called = True
+        return GuardrailClassifierDecision(
+            decision="warn",
+            reason="Do a narrow readback on the touched path.",
+            evidence_gap="change_readback",
+            guidance=("Read back the touched file directly.",),
+            source="test",
+        )
+
+    hooks = build_runtime_hooks(root_dir=str(tmp_path), classifier=fake_classifier)
+    session_id = "pending-verification-skips-classifier"
+    hooks.post_tool_call("read_file", {"path": str(target)}, "print('old')\n", session_id=session_id)
+    hooks.post_tool_call("patch", {"path": str(target), "old_string": "old", "new_string": "new"}, {"success": True}, session_id=session_id)
+
+    blocked = hooks.pre_tool_call("write_file", {"path": str(target), "content": "print('newer')\n"}, session_id=session_id)
+    assert blocked is not None
+    assert "Blocked by Proofrail [pending_verification]" in blocked["message"]
+    assert called is False
+
+    context = hooks.pre_llm_call(session_id=session_id)["context"]
+    assert "LLM classifier review" not in context
 
 
 def test_cwd_does_not_make_new_file_look_existing(tmp_path: Path) -> None:
@@ -522,9 +865,10 @@ def test_task_ledger_tracks_evidence_mutation_and_validation(tmp_path: Path) -> 
     assert state["validation_suggestions"]
 
     ctx = hooks.pre_llm_call(session_id=session_id)["context"]
-    assert "Autonomous task ledger" in ctx
-    assert "checklist" in ctx
+    assert "Phase: review | task: needs_validation" in ctx
+    assert "[SYSTEM STATUS — Final report requirements]" in ctx
     assert "Incomplete: there are still unvalidated changes" in ctx
+    assert "[SYSTEM STATUS — validation required]" in ctx
 
     hooks.post_tool_call("terminal", {"command": "pytest -q"}, {"exit_code": 0, "stdout": "1 passed"}, session_id=session_id)
     validated = hooks.explain_state(session_id)
@@ -623,3 +967,154 @@ def test_summary_marker_uses_proofrail_brand() -> None:
     summarized = summarize_large_output(text)
     assert "omitted by proofrail" in summarized
     assert "omitted by claude-compat" not in summarized
+
+
+# ── pre_llm_call context convergence tests ──────────────────────────
+
+
+def test_clean_observe_context_is_compact_and_system_status_like() -> None:
+    """Clean observe (no blocks, no risks) returns short system-status context."""
+    hooks = build_runtime_hooks()
+    ctx = hooks.pre_llm_call(session_id="clean-observe")["context"]
+
+    assert "[SYSTEM STATUS — not user input]" in ctx
+    assert "Phase: observe | task: needs_evidence" in ctx
+    assert "inspect the closest" in ctx
+
+    # Should NOT contain the heavyweight blocks present in risk mode
+    assert "[SYSTEM STATUS — task]" not in ctx
+    assert "Treat this as runtime state, not as a second user or reviewer" not in ctx
+    assert "Before mutating existing files or processes" not in ctx
+
+    # Should be short (<= 3 lines of content after header)
+    lines = ctx.strip().split("\n")
+    assert len(lines) <= 4  # header + 2-3 content lines
+
+
+def test_clean_execute_context_stays_compact() -> None:
+    """After evidence but before any mutation, clean execute still gets compact context."""
+    hooks = build_runtime_hooks()
+    session_id = "clean-execute"
+    hooks.post_tool_call("read_file", {"path": "/tmp/foo.py"}, "print('test')", session_id=session_id)
+    hooks.post_tool_call("search_files", {"path": "/tmp", "pattern": "*.py"}, "found: foo.py", session_id=session_id)
+
+    ctx = hooks.pre_llm_call(session_id=session_id)["context"]
+
+    assert "[SYSTEM STATUS — not user input]" in ctx
+    assert "Phase: execute | task: ready_to_execute" in ctx
+    assert "make the smallest explainable change" in ctx
+
+    # No risk = no heavyweight blocks
+    assert "[SYSTEM STATUS — task]" not in ctx
+
+
+def test_missing_evidence_block_retains_full_anti_bypass_context(tmp_path: Path) -> None:
+    """When a mutation is blocked for missing evidence, the context includes
+    the full anti-bypass guidance, not just the compact status."""
+    target = tmp_path / "config.json"
+    target.write_text('{"version": 1}')
+    hooks = build_runtime_hooks(root_dir=str(tmp_path))
+    session_id = "block-missing-evidence"
+
+    blocked = hooks.pre_tool_call(
+        "write_file", {"path": "config.json", "content": '{"version": 2}'}, session_id=session_id,
+    )
+    assert blocked is not None
+    assert blocked["action"] == "block"
+
+    ctx = hooks.pre_llm_call(session_id=session_id)["context"]
+
+    # Full anti-bypass context must be present
+    assert "Last tool call was blocked" in ctx
+    assert "Do not look for alternate tools, wrapper tools, or equivalent mutations" in ctx
+    assert "Gather local evidence on the same control path" in ctx
+    assert "Do not read plugin source, plugin tests" in ctx
+
+
+def test_pending_verification_block_retains_full_anti_bypass_context(tmp_path: Path) -> None:
+    """When there's pending verification, context keeps full guidance with
+    concrete validation next-steps, not abstract slogans."""
+    target = tmp_path / "app.py"
+    target.write_text("print('old')")
+    hooks = build_runtime_hooks(root_dir=str(tmp_path))
+    session_id = "pv-full"
+
+    hooks.post_tool_call("read_file", {"path": "app.py"}, "print('old')", session_id=session_id)
+    hooks.post_tool_call(
+        "write_file", {"path": "app.py", "content": "print('new')"}, {"success": True}, session_id=session_id,
+    )
+
+    ctx = hooks.pre_llm_call(session_id=session_id)["context"]
+
+    assert "Phase: review | task: needs_validation" in ctx
+    assert "[SYSTEM STATUS — validation required]" in ctx
+    assert "Do not stack more changes before this validation" in ctx
+    assert "[SYSTEM STATUS — Final report requirements]" in ctx
+
+
+def test_low_signal_threshold_retains_full_context(tmp_path: Path) -> None:
+    """When low-signal count reaches threshold, full warning context is retained."""
+    hooks = build_runtime_hooks(
+        settings=PluginSettings(low_signal_block_threshold=2), root_dir=str(tmp_path)
+    )
+    session_id = "low-signal-full"
+
+    # Pump low-signal count to threshold
+    for _ in range(3):
+        hooks.post_tool_call("read_file", {"path": "/fake/missing"}, '{"error": "not found"}', session_id=session_id)
+
+    ctx = hooks.pre_llm_call(session_id=session_id)["context"]
+
+    assert "[SYSTEM STATUS — low-signal warning]" in ctx
+    assert "Switch logs, paths, keywords, hosts, sources, or validation method" in ctx
+
+
+def test_classifier_warning_retains_full_guidance_context(tmp_path: Path) -> None:
+    """When the LLM classifier issues a non-allow decision, full guidance is retained."""
+    from proofrail.classifier import GuardrailClassifierDecision
+
+    target = tmp_path / "app.py"
+    target.write_text("print('old')\n")
+
+    def fake_classifier(**_kwargs):
+        return GuardrailClassifierDecision(
+            decision="warn",
+            reason="unverified mutation target — inspect first",
+            evidence_gap="target_state",
+            guidance=("inspect target first", "then make smallest change"),
+            source="test",
+        )
+
+    hooks = build_runtime_hooks(root_dir=str(tmp_path), classifier=fake_classifier)
+    session_id = "clsf-warn"
+    hooks.post_tool_call("read_file", {"path": "app.py"}, "print('old')\n", session_id=session_id)
+
+    decision = hooks.pre_tool_call(
+        "write_file", {"path": "app.py", "content": "print('new')\n"}, session_id=session_id,
+    )
+    assert decision is None  # warn, not block
+
+    ctx = hooks.pre_llm_call(session_id=session_id)["context"]
+
+    assert "[SYSTEM STATUS — LLM classifier review]" in ctx
+    assert "Decision: `warn`" in ctx
+    assert "unverified mutation target — inspect first" in ctx
+    assert "inspect target first" in ctx
+
+
+def test_compact_context_is_shorter_than_risk_context(tmp_path: Path) -> None:
+    """The compact (clean) context should be materially shorter than risk context."""
+    target = tmp_path / "f.txt"
+    target.write_text("data")
+    hooks = build_runtime_hooks(root_dir=str(tmp_path))
+
+    clean = hooks.pre_llm_call(session_id="len-clean")["context"]
+    assert "Phase: observe | task: needs_evidence" in clean
+
+    # Induce a block → risk mode
+    hooks.pre_tool_call("write_file", {"path": "f.txt", "content": "new"}, session_id="len-risk")
+    risk = hooks.pre_llm_call(session_id="len-risk")["context"]
+    assert "Last tool call was blocked" in risk
+
+    # Risk context should be clearly longer than clean context
+    assert len(risk) >= 1.5 * len(clean), f"risk={len(risk)} chars, clean={len(clean)} chars"

@@ -15,6 +15,10 @@ plugins:
       low_signal_block_threshold: 2
       audit_enabled: true
       audit_log_path: .proofrail/audit.jsonl
+      llm_classifier_enabled: true
+      # Leave provider/model unset to inherit the current session's main model.
+      llm_classifier_provider: null
+      llm_classifier_model: null
       tool_aliases:
         shell: exec
         run_command: exec
@@ -65,6 +69,29 @@ Optional path for the JSONL audit trail. If omitted, the runtime uses:
 ```
 
 If Hermes does not provide a root directory, the current working directory is used.
+
+### `llm_classifier_enabled`
+
+Enables the gray-area classifier path.
+
+- `false` — default. Proofrail only uses deterministic workflow rules.
+- `true` — when the host exposes `ctx.llm`, Proofrail adds an LLM-backed gray-area classifier after deterministic checks pass.
+
+The classifier never overrides deterministic blocks such as missing evidence or pending verification.
+
+### `llm_classifier_provider`
+
+Optional provider override for the classifier model.
+
+If omitted or set to `null`, Proofrail does **not** force a provider and Hermes routes the classifier call through the current session's active main provider.
+
+### `llm_classifier_model`
+
+Optional model override for the classifier model.
+
+If omitted or set to `null`, Proofrail does **not** force a model and Hermes routes the classifier call through the current session's active main model.
+
+Set `llm_classifier_provider` and `llm_classifier_model` together when you want the classifier to use a dedicated model. Leave both unset when you want it to follow the main model automatically.
 
 ### `tool_aliases`
 

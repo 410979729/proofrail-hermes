@@ -9,7 +9,11 @@ from threading import RLock
 from typing import Any
 
 from .constants import LOW_SIGNAL_PATTERNS, MAX_EVIDENCE_COUNT, MAX_SESSION_STATES, SESSION_STATE_TTL_SECONDS
-from .models import SessionRuntimeState
+from .models import (
+    ClassifierDecisionName,
+    ClassifierEvidenceGapName,
+    SessionRuntimeState,
+)
 from .path_utils import get_path_hints
 from .validation import summarize_paths
 from .text_utils import compact_label, first_string_field, normalize_signal_text
@@ -209,6 +213,36 @@ def record_block_decision(session_id: str, message: str, reason: str) -> Session
     def apply(state: SessionRuntimeState) -> None:
         state.last_block_message = message
         state.last_block_reason = reason
+
+    return STATE_STORE.update(session_id, apply)
+
+
+def record_classifier_decision(
+    session_id: str,
+    *,
+    decision: ClassifierDecisionName,
+    reason: str,
+    evidence_gap: ClassifierEvidenceGapName,
+    guidance: list[str] | tuple[str, ...],
+    source: str,
+) -> SessionRuntimeState:
+    def apply(state: SessionRuntimeState) -> None:
+        state.last_classifier_decision = decision
+        state.last_classifier_reason = reason.strip() or None
+        state.last_classifier_evidence_gap = evidence_gap
+        state.last_classifier_guidance = _merge_tuple((), guidance, limit=6)
+        state.last_classifier_source = source.strip() or None
+
+    return STATE_STORE.update(session_id, apply)
+
+
+def clear_classifier_decision(session_id: str) -> SessionRuntimeState:
+    def apply(state: SessionRuntimeState) -> None:
+        state.last_classifier_decision = None
+        state.last_classifier_reason = None
+        state.last_classifier_evidence_gap = None
+        state.last_classifier_guidance = ()
+        state.last_classifier_source = None
 
     return STATE_STORE.update(session_id, apply)
 

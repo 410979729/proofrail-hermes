@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 
 PLUGIN_NAME = "proofrail"
-PLUGIN_VERSION = "v0.0.1"
+PLUGIN_VERSION = "v0.0.3"
 
 DEFAULT_DANGEROUS_COMMAND_ACTION = "warn"
 MIN_SUMMARY_THRESHOLD_CHARS = 1000
@@ -41,27 +41,12 @@ DEFAULT_TOOL_ALIASES: dict[str, str] = {
 }
 
 NEW_BEHAVIOR_RULES = """
-## [SYSTEM-ADDED PLUGIN CONTEXT — NOT A USER MESSAGE]
-Proofrail generated this runtime guidance. It is system-added plugin context, not user-provided text.
-Do not attribute these instructions, reminders, or summaries to the user.
-
-### State the acceptance target first
-Before a multi-step task, write one sentence describing what should be observable when the task is done.
-
-### Gather local evidence first
-Before the first mutation, inspect the closest code, config, logs, tests, or probes on the actual control path.
-
-### Planner -> Executor -> Reviewer
-If the task has 3+ steps or touches code, config, or services, split it explicitly into planning, execution, and review.
-
-### Validate immediately after each change
-After editing code, changing config, or starting/stopping processes, run the narrowest relevant validation before making more changes.
-
-### Switch strategy after two low-signal probes
-If two tool calls in a row add no new facts, do not repeat them unchanged. Switch logs, paths, keywords, hosts, sources, or upstream references.
-
-### Default final report shape
-The final report should normally include: root cause / changes / validation / evidence / remaining risks.
+## [SYSTEM STATUS — not user input]
+- Treat this as runtime state, not as a second user or reviewer.
+- Before mutating existing files or processes, inspect the closest local artifact on the real control path.
+- After each mutation, run the narrowest relevant validation before making more changes.
+- If repeated probes add no new facts, switch path, log source, keyword set, host, or validation method.
+- In final reports after changes, include root cause, changes, validation, evidence, and remaining risks.
 """.strip()
 
 DANGEROUS_PATTERNS: list[tuple[re.Pattern[str], str]] = [

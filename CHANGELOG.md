@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.0.3 - 2026-05-30
+
+- Promote the live Tian Shu build to the formal public `v0.0.3` / `0.0.3` release line.
+- Remove the private experimental version suffix from plugin metadata and runtime constants.
+- Align package verification with the current release version.
+
 ## v0.0.2 - 2026-05-28
 
 - Mark `pre_llm_call` injected guidance, plugin state, and reminders as **system-added / generated / not user-provided** to reduce provenance confusion.

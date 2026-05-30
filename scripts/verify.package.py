@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import tomllib
 import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
+
+with (ROOT / 'pyproject.toml').open('rb') as fh:
+    PROJECT = tomllib.load(fh)
+
+EXPECTED_PLUGIN_VERSION = f"v{PROJECT['project']['version']}"
 
 
 def fail(message: str) -> None:
@@ -47,6 +53,11 @@ def main() -> None:
             import proofrail  # noqa: F401
             from proofrail import build_runtime_hooks, register  # noqa: F401
             from proofrail.constants import PLUGIN_NAME, PLUGIN_VERSION
+
+            if PLUGIN_NAME != 'proofrail':
+                fail(f'unexpected plugin name constant: {PLUGIN_NAME!r}')
+            if PLUGIN_VERSION != EXPECTED_PLUGIN_VERSION:
+                fail(f'unexpected plugin version constant: {PLUGIN_VERSION!r}')
         except Exception as exc:
             fail(f'import smoke failed: {exc!r}')
         finally:
@@ -54,11 +65,6 @@ def main() -> None:
                 sys.path.remove(str(tmp_path))
             except ValueError:
                 pass
-
-        if PLUGIN_NAME != 'proofrail':
-            fail(f'unexpected plugin name constant: {PLUGIN_NAME!r}')
-        if PLUGIN_VERSION != 'v0.0.1':
-            fail(f'unexpected plugin version constant: {PLUGIN_VERSION!r}')
 
     print('[package-verify] ok')
 

@@ -1,6 +1,6 @@
 name: proofrail
-version: v0.0.2
-description: Runtime harness plugin for Hermes with evidence-first execution and verification-first agent workflows.
+version: v0.0.3
+description: Runtime harness plugin for Hermes with evidence-first execution, verification-first workflows, and optional LLM gray-area classification.
 author: Yuheng
 provides_hooks:
   - on_session_start

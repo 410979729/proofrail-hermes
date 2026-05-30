@@ -48,27 +48,26 @@ def task_snapshot(state: SessionRuntimeState) -> dict[str, Any]:
 def render_task_context(state: SessionRuntimeState) -> str:
     """Render task-ledger context for pre_llm_call injection."""
     lines = [
-        "## [SYSTEM-ADDED PLUGIN STATE — GENERATED, NOT USER-PROVIDED] Autonomous task ledger",
+        "## [SYSTEM STATUS — task]",
         f"- Status: {task_status(state)}",
-        f"- Evidence / mutations / validations: {state.evidence_count}/{state.mutation_count}/{state.validation_count}",
     ]
     if state.evidence_labels:
         lines.append("- Recent evidence:")
         lines.extend(f"  - {item}" for item in state.evidence_labels[-5:])
     if state.mutation_labels:
-        lines.append("- Mutations in this session:")
+        lines.append("- Recent mutations:")
         lines.extend(f"  - {item}" for item in state.mutation_labels[-5:])
     if state.validation_labels:
-        lines.append("- Validations passed:")
+        lines.append("- Recent validations:")
         lines.extend(f"  - {item}" for item in state.validation_labels[-5:])
     if state.pending_verification:
-        lines.append("- Next: run the narrowest validation before adding more changes.")
+        lines.append("- Next step: validate the last mutation before making more changes.")
     elif state.mutation_count and state.validation_count:
-        lines.append("- Next: you may continue, but every new mutation still needs immediate validation.")
+        lines.append("- Next step: continue only if each new mutation is followed by immediate validation.")
     elif state.evidence_count:
-        lines.append("- Next: make the smallest explainable change, then validate it immediately.")
+        lines.append("- Next step: make the smallest explainable change, then validate it immediately.")
     else:
-        lines.append("- Next: inspect code, config, logs, or tests closest to the control path.")
+        lines.append("- Next step: inspect the closest code, config, log, or test on the control path.")
     return "\n".join(lines)
 
 
