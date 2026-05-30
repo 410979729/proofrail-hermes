@@ -85,8 +85,9 @@ MUTATING_EXEC_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\bpython(?:3)?\b.*\bopen\([^\n]*,['\"](?:w|a|x)[b+]?['\"]\)", re.I),
     # Shell redirection. Require start/whitespace before the operator so comparisons
     # such as `2>=1` or strings like `a>b` are not treated as mutations.
-    re.compile(r"(?:^|\s)\d?>>\s*[^\s&|;]+"),
-    re.compile(r"(?:^|\s)\d?>\s*(?![=>])[^\s&|;]+"),
+    # Exclude /dev/null — redirecting to the void is suppression, not a file mutation.
+    re.compile(r"(?:^|\s)\d?>>\s*(?!/dev/null)[^\s&|;]+"),
+    re.compile(r"(?:^|\s)\d?>\s*(?!/dev/null)(?![=>])[^\s&|;]+"),
 ]
 
 VALIDATION_EXEC_PATTERNS: list[re.Pattern[str]] = [
