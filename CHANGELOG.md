@@ -2,9 +2,10 @@
 
 ## v0.0.3 - 2026-05-30
 
-- Promote the live Tian Shu build to the formal public `v0.0.3` / `0.0.3` release line.
-- Remove the private experimental version suffix from plugin metadata and runtime constants.
-- Align package verification with the current release version.
+- Graduate from internal experimental builds into the formal public `v0.0.3` / `0.0.3` release line.
+- Remove `-dev` / `-exp` version suffixes from plugin metadata, runtime labels, and audit identifiers.
+- Tighten package verification (`scripts/verify.package.py`) to match the current release version instead of a stale snapshot.
+- No behavioral changes — hooks, validation logic, and dangerous-command policy are identical to the v0.0.2 runtime.
 
 ## v0.0.2 - 2026-05-28
 
