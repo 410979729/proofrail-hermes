@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fix the `ask_user` / `user_choice` approval flow so an explicit user confirmation can approve exactly one matching mutation, consume that approval once, and avoid getting clobbered by unrelated follow-up mutations.
+- Add regression coverage for clarify-driven approval consumption and tighten the phase-6 smoke script so it can import the local package reliably when run from `scripts/`.
+
 ## v0.0.4 - 2026-06-01
 
 - Promote the cooperative runtime path into the formal `v0.0.4` / `0.0.4` release line instead of leaving it as main-branch-only polish on top of `v0.0.3`.

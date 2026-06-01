@@ -57,6 +57,8 @@ class SessionRuntimeState:
     last_classifier_evidence_gap: ClassifierEvidenceGapName | None = None
     last_classifier_guidance: tuple[str, ...] = ()
     last_classifier_source: str | None = None
+    pending_user_choice_signature: str | None = None
+    approved_mutation_signature: str | None = None
     last_updated_at: float = 0.0
 
 

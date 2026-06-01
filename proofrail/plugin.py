@@ -45,6 +45,65 @@ from .text_utils import compact_label, extract_text_from_tool_result
 from .tooling import get_exec_command, get_tool_category, is_dangerous_command, is_likely_mutating_exec, is_likely_validation_exec
 from .validation import changed_path_hints, suggest_validations
 
+
+def _normalize_choice_text(text: str) -> str:
+    return " ".join(text.lower().split())
+
+
+def _looks_like_affirmative_choice(text: str) -> bool:
+    normalized = _normalize_choice_text(text)
+    if not normalized:
+        return False
+    return any(token in normalized for token in (
+        "yes",
+        "yep",
+        "yeah",
+        "confirm",
+        "approved",
+        "approve",
+        "go ahead",
+        "push now",
+        "publish now",
+        "现在推",
+        "可以推",
+        "确认",
+        "同意",
+        "发布",
+    ))
+
+
+def _choice_signature_tokens(text: str) -> tuple[str, ...]:
+    normalized = _normalize_choice_text(text)
+    if ":" in normalized:
+        prefix, rest = normalized.split(":", 1)
+        if prefix in {"exec", "terminal", "write", "write_file", "patch"}:
+            normalized = rest
+    raw_tokens = [token for token in re.split(r"[^a-z0-9_./:-]+", normalized) if token]
+    stopwords = {"origin", "command", "file", "path", "branch", "remote", "terminal", "write", "patch"}
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for token in raw_tokens:
+        for part in re.split(r"[./:-]+", token):
+            if len(part) < 4 or part in stopwords:
+                continue
+            if part not in seen:
+                seen.add(part)
+                ordered.append(part)
+    return tuple(ordered)
+
+
+def _signature_matches_user_choice(signature: str, response_text: str) -> bool:
+    normalized_signature = _normalize_choice_text(signature)
+    normalized_response = _normalize_choice_text(response_text)
+    if not normalized_signature or not normalized_response:
+        return False
+    if normalized_signature in normalized_response:
+        return True
+    signature_tokens = _choice_signature_tokens(signature)
+    response_tokens = set(_choice_signature_tokens(response_text))
+    return bool(signature_tokens) and all(token in response_tokens for token in signature_tokens)
+
+
 logger = logging.getLogger(__name__)
 HookDecision = dict[str, str]
 
@@ -624,6 +683,8 @@ class RuntimeHooks:
             "last_classifier_evidence_gap": state.last_classifier_evidence_gap,
             "last_classifier_guidance": list(state.last_classifier_guidance),
             "last_classifier_source": state.last_classifier_source,
+            "pending_user_choice_signature": state.pending_user_choice_signature,
+            "approved_mutation_signature": state.approved_mutation_signature,
             "task": task_snapshot(state),
             "next_expected": next_expected,
             "audit_log_path": str(self.audit.path) if self.audit.path else None,
@@ -670,6 +731,12 @@ class RuntimeHooks:
         target_hints = list(state.touched_files) or changed_path_hints(tool_name, payload, command)
         target_label = compact_label(target_hints[0], 120) if target_hints else compact_label(state.last_mutation_label or "the current target", 120)
 
+        approved_user_choice = bool(
+            state.approved_mutation_signature
+            and is_mutation
+            and tool_intent == state.approved_mutation_signature
+        )
+
         dangerous, label = is_dangerous_command(command) if category == "exec" and command else (False, None)
         if dangerous and label:
             record_dangerous_command(session_id, label)
@@ -696,6 +763,44 @@ class RuntimeHooks:
                 self.audit.record("tool_warning", session_id=session_id or "default", tool_name=tool_name, warning=f"dangerous command allowed with audit if workflow checks pass: {label}")
             elif self.settings.dangerous_command_action == "allow":
                 self.audit.record("tool_decision", session_id=session_id or "default", tool_name=tool_name, decision={"action": "allow"}, reason="dangerous_command_allow_if_workflow_checks_pass")
+
+        if approved_user_choice:
+            def _consume_user_choice(current) -> None:
+                current.approved_mutation_signature = None
+                current.pending_user_choice_signature = None
+                current.last_block_message = None
+                current.last_block_reason = None
+                current.last_classifier_decision = None
+                current.last_classifier_reason = None
+                current.last_classifier_evidence_gap = None
+                current.last_classifier_guidance = ()
+                current.last_classifier_source = None
+                current.forced_next_mode = "none"
+                current.forced_next_target = None
+                current.forced_next_why = None
+                current.forced_next_exit_condition = None
+                current.allowed_next_actions = ()
+                current.forbidden_next_actions = ()
+
+            STATE_STORE.update(session_id, _consume_user_choice)
+            self.audit.record(
+                "user_choice_consumed",
+                session_id=session_id or "default",
+                tool_name=tool_name,
+                command=command,
+                approved_signature=tool_intent,
+            )
+            self.audit.record(
+                "tool_preflight",
+                session_id=session_id or "default",
+                tool_name=tool_name,
+                category=category,
+                command=command,
+                is_mutation=is_mutation,
+                decision="allow",
+                reason="approved_user_choice",
+            )
+            return None
 
         if state.forced_next_mode == "validate_only":
             allowed_readback = _readback_validates_touched_file(
@@ -853,6 +958,14 @@ class RuntimeHooks:
                     guidance=list(decision.guidance),
                 )
                 if decision.decision in {"block", "ask_user"}:
+                    if decision.decision == "ask_user" or decision.evidence_gap == "user_choice":
+                        def _remember_pending_choice(current) -> None:
+                            if current.approved_mutation_signature is None:
+                                current.pending_user_choice_signature = tool_intent
+                            elif current.pending_user_choice_signature is None:
+                                current.pending_user_choice_signature = current.approved_mutation_signature
+
+                        STATE_STORE.update(session_id, _remember_pending_choice)
                     classifier_state = STATE_STORE.snapshot(session_id)
                     classifier_target = classifier_state.forced_next_target or target_label
                     guidance_items = tuple(decision.guidance) if decision.guidance else (
@@ -933,6 +1046,18 @@ class RuntimeHooks:
             touched_paths=touched_paths,
             validation_suggestions=validation_suggestions,
         )
+        if tool_name == "clarify" and prior_state.pending_user_choice_signature and not error_text.strip() and _looks_like_affirmative_choice(text):
+            def _approve_user_choice(current) -> None:
+                current.approved_mutation_signature = prior_state.pending_user_choice_signature
+                current.pending_user_choice_signature = None
+
+            state = STATE_STORE.update(session_id, _approve_user_choice)
+            self.audit.record(
+                "user_choice_approved",
+                session_id=session_id or "default",
+                approved_signature=state.approved_mutation_signature,
+                response_preview=compact_label(text, 200),
+            )
         if state.forced_next_mode != prior_state.forced_next_mode or state.forced_next_target != prior_state.forced_next_target:
             if state.forced_next_mode == "validate_only" and (category == "write" or mutating_exec):
                 transition_reason = "pending_verification"

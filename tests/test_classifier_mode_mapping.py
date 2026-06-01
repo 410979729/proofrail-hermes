@@ -15,6 +15,7 @@ def _clear_modes() -> None:
     STATE_STORE.clear("classifier-user-choice")
     STATE_STORE.clear("classifier-target-state")
     STATE_STORE.clear("classifier-narrow-validation")
+    STATE_STORE.clear("classifier-user-choice-approval")
 
 
 def test_classifier_warn_strategy_shift_sets_change_strategy_mode(tmp_path: Path) -> None:
@@ -183,3 +184,71 @@ def test_classifier_ask_user_sets_user_choice_mode_and_blocks_mutation(tmp_path:
     assert "current proofrail mode: user_choice" in context
     assert "current subgoal: wait for an explicit user decision before continuing" in context
     assert "ask the user which behavior they want" in context
+
+
+def test_clarify_response_only_allows_matching_mutation_and_consumes_once(tmp_path: Path) -> None:
+    target = tmp_path / "notes.txt"
+    target.write_text("publish target: origin/main\n")
+
+    def fake_classifier(**_kwargs):
+        return GuardrailClassifierDecision(
+            decision="ask_user",
+            reason="Publishing changes needs an explicit user confirmation.",
+            evidence_gap="user_choice",
+            guidance=(
+                "ask the user whether to publish now",
+                "do not mutate until the choice is explicit",
+            ),
+            source="test",
+        )
+
+    hooks = build_runtime_hooks(root_dir=str(tmp_path), classifier=fake_classifier)
+    session_id = "classifier-user-choice-approval"
+    hooks.post_tool_call("read_file", {"path": "notes.txt"}, "publish target: origin/main\n", session_id=session_id)
+
+    blocked = hooks.pre_tool_call(
+        "terminal",
+        {"command": "git push origin main"},
+        session_id=session_id,
+    )
+
+    assert blocked is not None
+    assert blocked["action"] == "block"
+    assert "ask the user whether to publish now" in blocked["message"]
+
+    hooks.post_tool_call(
+        "clarify",
+        {"question": "Publish to main now?"},
+        {"message": "Yes, push to main now."},
+        session_id=session_id,
+    )
+
+    approved_state = hooks.explain_state(session_id)
+    assert approved_state["approved_mutation_signature"] == "exec:git push origin main"
+    assert approved_state["pending_user_choice_signature"] is None
+
+    still_blocked = hooks.pre_tool_call(
+        "terminal",
+        {"command": "git push origin release"},
+        session_id=session_id,
+    )
+    assert still_blocked is not None
+    assert still_blocked["action"] == "block"
+
+    allowed = hooks.pre_tool_call(
+        "terminal",
+        {"command": "git push origin main"},
+        session_id=session_id,
+    )
+    assert allowed is None
+
+    state = hooks.explain_state(session_id)
+    assert state["forced_next_mode"] == "none"
+
+    blocked_again = hooks.pre_tool_call(
+        "terminal",
+        {"command": "git push origin main"},
+        session_id=session_id,
+    )
+    assert blocked_again is not None
+    assert blocked_again["action"] == "block"
