@@ -75,3 +75,29 @@ def test_read_file_on_unrelated_path_does_not_clear_pending_verification(tmp_pat
     state = hooks.explain_state(session_id)
     assert state["pending_verification"] is True
     assert state["validation_count"] == 0
+
+
+def test_failed_mutating_exec_after_validation_does_not_reenter_pending_verification(tmp_path: Path) -> None:
+    STATE_STORE.clear("failed-mutating-exec-stays-clear")
+    target = tmp_path / "docs" / "architecture.md"
+    target.parent.mkdir()
+    target.write_text("old")
+    hooks = build_runtime_hooks(root_dir=str(tmp_path))
+    session_id = "failed-mutating-exec-stays-clear"
+
+    _record_write_with_pending_verification(hooks, session_id, "docs/architecture.md")
+    hooks.post_tool_call("read_file", {"path": "docs/architecture.md"}, "new", session_id=session_id)
+    assert hooks.explain_state(session_id)["pending_verification"] is False
+
+    hooks.post_tool_call(
+        "terminal",
+        {"command": "python3 -m pip install --user build"},
+        {"exit_code": 1, "stdout": "error: externally-managed-environment"},
+        session_id=session_id,
+    )
+
+    state = hooks.explain_state(session_id)
+    assert state["pending_verification"] is False
+    assert state["forced_next_mode"] == "none"
+    assert state["last_mutation_label"] is None
+    assert hooks.pre_tool_call("terminal", {"command": "python3 -m venv .venv.release"}, session_id=session_id) is None

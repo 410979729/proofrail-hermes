@@ -96,6 +96,7 @@ class HermesLlmGuardrailClassifier:
     provider: str | None = None
     model: str | None = None
     source: str = "llm"
+    fallback: RuleBasedGrayAreaClassifier | None = None
 
     def __call__(
         self,
@@ -124,41 +125,54 @@ class HermesLlmGuardrailClassifier:
                 "last_block_reason": session_state.last_block_reason,
             },
         }
-        result = self.llm.complete_structured(
-            instructions=(
-                "You are the Proofrail gray-area classifier. Follow these rules: "
-                "(1) do not override deterministic workflow blocks, "
-                "(2) prefer narrow target-state evidence before mutation, "
-                "(3) require narrow validation after mutation, "
-                "(4) if the situation is really a user choice, return ask_user, "
-                "(5) never invent file paths, commands, or evidence details."
-            ),
-            input=[{"type": "text", "text": str(payload)}],
-            json_schema={
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "decision": {"type": "string", "enum": ["allow", "warn", "ask_user", "block"]},
-                    "reason": {"type": "string"},
-                    "evidence_gap": {
-                        "type": "string",
-                        "enum": [
-                            "none",
-                            "target_state",
-                            "change_readback",
-                            "narrow_validation",
-                            "user_choice",
-                            "strategy_shift",
-                            "unclear",
-                        ],
+        try:
+            result = self.llm.complete_structured(
+                instructions=(
+                    "You are the Proofrail gray-area classifier. Follow these rules: "
+                    "(1) do not override deterministic workflow blocks, "
+                    "(2) prefer narrow target-state evidence before mutation, "
+                    "(3) require narrow validation after mutation, "
+                    "(4) if the situation is really a user choice, return ask_user, "
+                    "(5) never invent file paths, commands, or evidence details."
+                ),
+                input=[{"type": "text", "text": str(payload)}],
+                json_schema={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "decision": {"type": "string", "enum": ["allow", "warn", "ask_user", "block"]},
+                        "reason": {"type": "string"},
+                        "evidence_gap": {
+                            "type": "string",
+                            "enum": [
+                                "none",
+                                "target_state",
+                                "change_readback",
+                                "narrow_validation",
+                                "user_choice",
+                                "strategy_shift",
+                                "unclear",
+                            ],
+                        },
+                        "guidance": {"type": "array", "items": {"type": "string"}},
                     },
-                    "guidance": {"type": "array", "items": {"type": "string"}},
+                    "required": ["decision", "reason", "evidence_gap", "guidance"],
                 },
-                "required": ["decision", "reason", "evidence_gap", "guidance"],
-            },
-            provider=self.provider,
-            model=self.model,
-        )
+                provider=self.provider,
+                model=self.model,
+            )
+        except Exception as exc:
+            if _looks_like_structured_output_unsupported(exc):
+                fallback = self.fallback or RuleBasedGrayAreaClassifier(source="rule_fallback")
+                return fallback(
+                    tool_name=tool_name,
+                    args=args,
+                    session_state=session_state,
+                    command=command,
+                    category=category,
+                    is_mutation=is_mutation,
+                )
+            raise
         parsed = getattr(result, "parsed", None) or {}
         normalized = normalize_classifier_decision(
             GuardrailClassifierDecision(
@@ -174,6 +188,14 @@ class HermesLlmGuardrailClassifier:
         object.__setattr__(normalized, "decision", str(parsed.get("decision") or normalized.decision))
         object.__setattr__(normalized, "evidence_gap", str(parsed.get("evidence_gap") or normalized.evidence_gap))
         return normalize_classifier_decision(normalized)
+
+
+def _looks_like_structured_output_unsupported(exc: Exception) -> bool:
+    text = str(exc or "").lower()
+    return (
+        ("json_schema" in text or "response_format" in text or "structured output" in text)
+        and ("unsupported" in text or "not supported" in text or "400" in text)
+    )
 
 
 def should_run_classifier(

@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+## v0.0.4 - 2026-06-01
+
+- Promote the cooperative runtime path into the formal `v0.0.4` / `0.0.4` release line instead of leaving it as main-branch-only polish on top of `v0.0.3`.
+- Add explicit forced modes (`gather_target_evidence`, `validate_only`, `change_strategy`, `user_choice`) with collaboration-framed handoff panels, allowed/forbidden next actions, and clearer smallest-next-step guidance.
+- Add classifier fallback from unsupported structured output into `RuleBasedGrayAreaClassifier`, plus classifier-to-mode mapping so gray-area interventions become concrete runtime submodes.
+- Emit cooperative-runtime audit semantics including `forced_mode_transition` and `forward_progress_reopened` when validation clears the review lane.
+- Expand regression and smoke coverage with the cooperative-runtime suites and `scripts/phase6.live.smoke.py`; extend CI coverage to Python 3.11 and 3.12.
+- Ignore local workspace-only agent files (`AGENTS.md`, `BOOTSTRAP.md`, `SOUL.md`, `USER.md`, `TOOLS.md`, `IDENTITY.md`, `.openclaw/`) so the repository can be published without private workspace scaffolding.
+
 ## v0.0.3 - 2026-05-30
 
 - Graduate from internal experimental builds into the formal public `v0.0.3` / `0.0.3` release line.

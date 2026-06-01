@@ -36,11 +36,13 @@ For Hermes, that means a runtime plugin that can:
 
 ## Current status
 
-- Version: `v0.0.3`
+- Version: `v0.0.4`
 - Host: **Hermes Agent plugin hooks**
 - Language: **Python**
 
-> Version note: the GitHub release/tag line is `v0.0.3`, while the Python package and wheel version is `0.0.3` to follow PEP 440. They refer to the same release.
+> Version note: the GitHub release/tag line is `v0.0.4`, while the Python package and wheel version is `0.0.4` to follow PEP 440. They refer to the same release.
+
+The current main branch is the cooperative-runtime `v0.0.4` line: explicit forced modes, classifier fallback/mode mapping, mode-transition audit, and forward-progress reopen signaling are now part of the release baseline.
 
 ## Quick start
 
@@ -64,11 +66,14 @@ If the target instance already has other plugins, append `proofrail` to the exis
 
 - **evidence before mutation** — inspect first, then edit
 - **verify after mutation** — validate changes before continuing
+- **cooperative forced modes** — enter explicit `gather_target_evidence`, `validate_only`, `change_strategy`, or `user_choice` submodes with allowed / forbidden next actions
+- **mode-specific task handoffs** — inject collaboration-framed task panels so the next legal move feels like progress instead of punishment
 - **low-signal probe blocking** — stop repeated no-progress probing loops
+- **gray-area classifier fallback + mode mapping** — when structured output is unsupported, fall back to rule-based classification; when the classifier does intervene, map it into cooperative runtime modes
 - **dangerous command audit** — detect high-risk commands and surface them back into reasoning context
 - **large output summarization** — compress oversized tool output before reinjection
 - **session-scoped workflow state** — maintain Observe / Execute / Review phase per session
-- **audit trail** — JSONL audit events for preflight, mutation, validation, dangerous commands, and summarization
+- **audit trail** — JSONL audit events for preflight, mutation, validation, forced-mode transitions, forward-progress reopen events, dangerous commands, and summarization
 - **task ledger** — session-level record of evidence, mutations, validation, touched files, and final state
 - **validation suggestions** — inject the narrowest plausible verification hints from touched files and command shape
 
@@ -82,6 +87,9 @@ If the target instance already has other plugins, append `proofrail` to the exis
 5. **Large tool output is summarized through `transform_tool_result`**
 6. **`pre_llm_call` injects phase-aware runtime context**
 7. **After changes, the plugin injects touched files, validation hints, and final evidence-report requirements**
+8. **Hard workflow blocks enter cooperative modes, not just warning prose**
+9. **Classifier interventions can route the runtime into `change_strategy` or `user_choice` instead of leaving the model to guess the shortest legal next step**
+10. **Successful validation explicitly reopens forward progress and emits a semantic audit event**
 
 ## Configuration
 
@@ -141,17 +149,34 @@ Core regression coverage currently includes:
 - readback validation that clears `pending_verification` when the touched target is directly re-read
 - blocked-tool-call feedback reinjected into later reasoning context
 - summarize branding regression
+- cooperative forced modes with allowed / forbidden action menus
+- classifier structured-output fallback to rule-based gray-area review
+- classifier-to-mode mapping for `change_strategy` and `user_choice`
+- mode-specific collaboration handoff wording
+- mode lifecycle audit for `validate_only` entry / clear
+- block-driven mode-transition audit for `missing_evidence` and `low_signal_repeat`
+- `forward_progress_reopened` semantics after successful validation
+- end-to-end behavior simulation and local self-smoke of the cooperative runtime path
 
 Run the local verification lane with:
 
 ```bash
-pytest -q tests/test_proofrail.py tests/test_readback_validation_regression.py
+pytest -q \
+  tests/test_proofrail.py \
+  tests/test_readback_validation_regression.py \
+  tests/test_cooperative_modes.py \
+  tests/test_classifier_fallback.py \
+  tests/test_classifier_mode_mapping.py \
+  tests/test_phase4_audit_and_wording.py \
+  tests/test_phase5_mode_lifecycle.py \
+  tests/test_phase6_behavior_simulation.py
 rm -rf __pycache__ proofrail/__pycache__ tests/__pycache__ scripts/__pycache__ .pytest_cache
-python scripts/check.release.py
-python -m build --wheel
-python scripts/verify.package.py
+python3 scripts/check.release.py
+python3 -m build --wheel
+python3 scripts/verify.package.py
+PYTHONPATH=. python3 scripts/phase6.live.smoke.py
 rm -rf __pycache__ proofrail/__pycache__ tests/__pycache__ scripts/__pycache__ build dist *.egg-info .pytest_cache
-python scripts/check.release.py
+python3 scripts/check.release.py
 ```
 
 ## Security and current limits

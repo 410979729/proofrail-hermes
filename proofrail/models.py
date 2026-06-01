@@ -8,6 +8,7 @@ from typing import Any, Literal
 SessionPhase = Literal["observe", "execute", "review"]
 DangerousCommandAction = Literal["approve", "block", "warn", "allow"]
 ToolCategoryName = Literal["read", "write", "exec", "search", "network", "other"]
+ForcedNextMode = Literal["none", "gather_target_evidence", "validate_only", "change_strategy", "user_choice"]
 ClassifierDecisionName = Literal["allow", "warn", "ask_user", "block"]
 ClassifierEvidenceGapName = Literal[
     "none",
@@ -45,6 +46,12 @@ class SessionRuntimeState:
     final_report_required: bool = False
     last_block_message: str | None = None
     last_block_reason: str | None = None
+    forced_next_mode: ForcedNextMode = "none"
+    forced_next_target: str | None = None
+    forced_next_why: str | None = None
+    forced_next_exit_condition: str | None = None
+    allowed_next_actions: tuple[str, ...] = ()
+    forbidden_next_actions: tuple[str, ...] = ()
     last_classifier_decision: ClassifierDecisionName | None = None
     last_classifier_reason: str | None = None
     last_classifier_evidence_gap: ClassifierEvidenceGapName | None = None

@@ -142,29 +142,34 @@ Responsibilities:
 - inject phase summaries and runtime reminders
 - append context rather than rewriting the system prompt
 
-## Current v0.0.3 autonomous harness layer
+## Current v0.0.4 cooperative runtime release line
 
-v0.0.3 currently includes:
+The public `v0.0.4` / `0.0.4` release line includes:
 
 1. default `dangerous_command_action=warn`; high-risk commands stay out of a manual approval loop, but they are audited and paired with self-verification reminders
 2. a JSONL audit trail for session lifecycle, tool preflight, dangerous commands, tool results, and large-output summarization
 3. a validation-suggestion layer that proposes narrow follow-up checks from touched files and command shape
-4. session state for mutation / validation / dangerous-command counts, touched files, validation suggestions, and recent labels
+4. session state for mutation / validation / dangerous-command counts, touched files, validation suggestions, recent labels, and task-ledger state
 5. `pre_llm_call` injection of touched files, suggested validations, dangerous-command audit reminders, and final evidence-report requirements
-6. tests covering hook registration, dangerous-command handling, evidence-before-mutation, verify-after-mutation, low-signal blocking, summarization, task ledger, audit logging, and review-state cleanup
+6. explicit forced modes: `gather_target_evidence`, `validate_only`, `change_strategy`, and `user_choice`
+7. task-panel handoff framing with allowed / forbidden next actions and mode-specific collaboration wording
+8. classifier fallback from unsupported structured output into `RuleBasedGrayAreaClassifier`
+9. classifier-to-mode mapping so gray-area decisions become concrete runtime submodes
+10. `forced_mode_transition` audit events from classifier, block, and tool-observation sources
+11. `forward_progress_reopened` semantics when validation clears `validate_only`
+12. behavior-simulation and self-smoke coverage for the cooperative path
 
 ## Version semantics
 
-- GitHub release/tag line: `v0.0.3`
-- Python package version: `0.0.3`
+- GitHub release/tag line: `v0.0.4`
+- Python package version: `0.0.4`
 
 This split is intentional: GitHub tags keep the leading `v`, while Python packaging follows PEP 440.
 
 ## Planned Next Steps
 
-1. add a durable task ledger for task goals, acceptance criteria, evidence, mutations, validations, and final state
-2. expose `explain_state()` as a formal Hermes debug tool
-3. add diff / mutation review summaries to the final review lane
-4. add compaction-related snapshots and recovery anchors
-5. add clean-install / wheel / plugin-dir installation smoke tests
-6. validate the plugin in a live Hermes rollout
+1. expose `explain_state()` as a formal Hermes debug tool
+2. add diff / mutation review summaries to the final review lane
+3. add compaction-related snapshots and recovery anchors
+4. add clean-install / wheel / plugin-dir installation smoke tests
+5. validate the plugin in a live Hermes rollout

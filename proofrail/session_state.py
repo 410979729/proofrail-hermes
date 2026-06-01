@@ -12,6 +12,7 @@ from .constants import LOW_SIGNAL_PATTERNS, MAX_EVIDENCE_COUNT, MAX_SESSION_STAT
 from .models import (
     ClassifierDecisionName,
     ClassifierEvidenceGapName,
+    ForcedNextMode,
     SessionRuntimeState,
 )
 from .path_utils import get_path_hints
@@ -83,8 +84,11 @@ def describe_observation(tool_name: str, input_data: dict[str, Any], tool_aliase
     if get_tool_category(tool_name, tool_aliases) == "exec":
         command = get_exec_command(input_data)
         return f"exec observation: {compact_label(command, 100)}" if command else "exec observation"
+    path_hints = get_path_hints(input_data)
+    if normalized == "read_file" and path_hints:
+        return f"read_file: {path_hints[0]}"
     target = (
-        get_path_hints(input_data)[0] if get_path_hints(input_data) else ""
+        path_hints[0] if path_hints else ""
     ) or first_string_field(input_data, ["query", "pattern", "url", "uri"]) or normalized or tool_name
     return f"{normalized or tool_name}: {compact_label(target, 100)}"
 
@@ -162,6 +166,7 @@ def record_tool_observation(
         tool_intent = build_tool_intent_signature(tool_name, args, tool_aliases)
         low_signal = False if validation_succeeded else is_low_signal_observation(tool_name, text, error_text)
         low_signal_signature = normalize_signal_text(text)[:160] or f"{tool_name}:empty"
+        mutation_succeeded = (category == "write" or mutating_exec) and not error_text.strip()
 
         if low_signal:
             if state.last_low_signal_signature == low_signal_signature:
@@ -184,8 +189,9 @@ def record_tool_observation(
             if state.last_block_reason in {"missing_evidence", "low_signal_repeat"}:
                 state.last_block_message = None
                 state.last_block_reason = None
+                clear_forced_next_mode_unlocked(state)
 
-        if category == "write" or mutating_exec:
+        if mutation_succeeded:
             state.pending_verification = True
             state.last_mutation_label = describe_mutation(tool_name, args, tool_aliases)
             state.mutation_count += 1
@@ -194,6 +200,21 @@ def record_tool_observation(
             state.phase = "review"
             state.touched_files = _merge_tuple(state.touched_files, summarize_paths(touched_paths or []))
             state.validation_suggestions = _merge_tuple(state.validation_suggestions, validation_suggestions or [])
+            target = summarize_paths(touched_paths or [])
+            target_label = target[0] if target else compact_label(state.last_mutation_label or "recent mutation", 120)
+            state.forced_next_mode = "validate_only"
+            state.forced_next_target = target_label
+            state.forced_next_why = "Once this is verified, forward progress can continue safely."
+            state.forced_next_exit_condition = f"Confirm the last change on {target_label} landed as intended."
+            state.allowed_next_actions = (
+                f"read back {target_label} directly",
+                f"run one narrow validation against {target_label}",
+            )
+            state.forbidden_next_actions = (
+                "further mutation",
+                "alternate tools for the same mutation",
+                "broad search or replanning",
+            )
         elif state.pending_verification and validation_succeeded:
             state.pending_verification = False
             state.last_mutation_label = None
@@ -205,6 +226,9 @@ def record_tool_observation(
             if state.last_block_reason == "pending_verification":
                 state.last_block_message = None
                 state.last_block_reason = None
+            clear_forced_next_mode_unlocked(state)
+            state.forced_next_why = "The last change is verified; forward progress reopened."
+            state.forced_next_exit_condition = "validation complete"
 
     return STATE_STORE.update(session_id, apply)
 
@@ -215,6 +239,43 @@ def record_block_decision(session_id: str, message: str, reason: str) -> Session
         state.last_block_reason = reason
 
     return STATE_STORE.update(session_id, apply)
+
+
+def set_forced_next_mode(
+    session_id: str,
+    *,
+    mode: ForcedNextMode,
+    target: str | None,
+    why: str | None,
+    exit_condition: str | None,
+    allowed_actions: list[str] | tuple[str, ...] = (),
+    forbidden_actions: list[str] | tuple[str, ...] = (),
+) -> SessionRuntimeState:
+    def apply(state: SessionRuntimeState) -> None:
+        state.forced_next_mode = mode
+        state.forced_next_target = target.strip() if isinstance(target, str) and target.strip() else None
+        state.forced_next_why = why.strip() if isinstance(why, str) and why.strip() else None
+        state.forced_next_exit_condition = exit_condition.strip() if isinstance(exit_condition, str) and exit_condition.strip() else None
+        state.allowed_next_actions = _merge_tuple((), allowed_actions, limit=8)
+        state.forbidden_next_actions = _merge_tuple((), forbidden_actions, limit=8)
+
+    return STATE_STORE.update(session_id, apply)
+
+
+def clear_forced_next_mode(session_id: str) -> SessionRuntimeState:
+    def apply(state: SessionRuntimeState) -> None:
+        clear_forced_next_mode_unlocked(state)
+
+    return STATE_STORE.update(session_id, apply)
+
+
+def clear_forced_next_mode_unlocked(state: SessionRuntimeState) -> None:
+    state.forced_next_mode = "none"
+    state.forced_next_target = None
+    state.forced_next_why = None
+    state.forced_next_exit_condition = None
+    state.allowed_next_actions = ()
+    state.forbidden_next_actions = ()
 
 
 def record_classifier_decision(

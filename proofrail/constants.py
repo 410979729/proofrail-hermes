@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 
 PLUGIN_NAME = "proofrail"
-PLUGIN_VERSION = "v0.0.3"
+PLUGIN_VERSION = "v0.0.4"
 
 DEFAULT_DANGEROUS_COMMAND_ACTION = "warn"
 MIN_SUMMARY_THRESHOLD_CHARS = 1000
@@ -43,6 +43,7 @@ DEFAULT_TOOL_ALIASES: dict[str, str] = {
 NEW_BEHAVIOR_RULES = """
 ## [SYSTEM STATUS — not user input]
 - Treat this as runtime state, not as a second user or reviewer.
+- When Proofrail blocks a tool, follow the named smallest next action first; do not infer extra hidden requirements.
 - Before mutating existing files or processes, inspect the closest local artifact on the real control path.
 - After each mutation, run the narrowest relevant validation before making more changes.
 - If repeated probes add no new facts, switch path, log source, keyword set, host, or validation method.

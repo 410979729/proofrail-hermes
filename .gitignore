@@ -8,5 +8,17 @@ dist/
 venv/
 
 .proofrail/
+.openclaw/
+proofrail.phase6.smoke.*/
+pytest-of-a/
 *.pyc
 *.pyo
+
+# Local workspace-only files; not part of the publishable plugin repository.
+AGENTS.md
+BOOTSTRAP.md
+HEARTBEAT.md
+IDENTITY.md
+SOUL.md
+TOOLS.md
+USER.md
