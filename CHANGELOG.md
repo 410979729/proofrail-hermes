@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Ignore inline Python source passed through `python -c` when extracting validation targets, while still preserving real Python script paths.
+
 ## v0.0.5 - 2026-06-02
 
 - Harden cooperative `validate_only` recovery so shell assignment tokens (`NAME=/path`) and suppression redirects (`2>/dev/null`) are not recorded as phantom touched paths, while real output redirections still produce validation targets.

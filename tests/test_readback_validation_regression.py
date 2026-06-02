@@ -121,6 +121,23 @@ def test_command_path_hints_keep_real_stdout_redirection_target() -> None:
     assert changed_path_hints("terminal", {}, "printf ok >/tmp/proofrail-out.txt") == ["/tmp/proofrail-out.txt"]
 
 
+def test_command_path_hints_ignore_python_dash_c_inline_code() -> None:
+    hints = changed_path_hints(
+        "terminal",
+        {},
+        "python3 -c \"import sqlite3, json\n"
+        "from datetime import datetime, timezone, timedelta\n"
+        "db = sqlite3.connect('/home/a/.hermes-yuheng/scope-recall/memory.sqlite3')\n"
+        "print(db)\"",
+    )
+
+    assert hints == []
+
+
+def test_command_path_hints_keep_python_script_path() -> None:
+    assert changed_path_hints("terminal", {}, "python3 scripts/check.release.py") == ["scripts/check.release.py"]
+
+
 def test_directory_target_can_be_cleared_by_child_readback(tmp_path: Path) -> None:
     STATE_STORE.clear("directory-target-child-readback")
     target_dir = tmp_path / "project"

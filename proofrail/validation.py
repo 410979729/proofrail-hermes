@@ -19,6 +19,7 @@ _JSON_SUFFIXES = {".json"}
 _DOC_SUFFIXES = {".md", ".rst", ".txt"}
 _SHELL_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\+?=")
 _REDIRECT_PREFIX_RE = re.compile(r"^(?P<op>\d*(?:>>?|<<?)|&>|\d*>&)(?P<target>.*)$")
+_PYTHON_EXECUTABLE_RE = re.compile(r"^(?:python(?:\d+(?:\.\d+)?)?|pythonw(?:\d+(?:\.\d+)?)?|pypy(?:\d+(?:\.\d+)?)?)$")
 
 
 def changed_path_hints(tool_name: str, args: dict[str, object], command: str = "") -> list[str]:
@@ -83,12 +84,43 @@ def _command_path_hints(command: str) -> list[str]:
 
     out: list[str] = []
     seen: set[str] = set()
+    python_arg_mode = False
+    skip_next_python_code = False
     for raw_part in parts:
+        if skip_next_python_code:
+            skip_next_python_code = False
+            python_arg_mode = False
+            continue
+
+        if _is_python_executable_token(raw_part):
+            # The interpreter itself is context, not a touched path. Enter a
+            # narrow Python argv mode so ``python -c '<code with /paths>'``
+            # cannot poison validate_only with the inline source string, while
+            # keeping real script paths such as ``python scripts/check.py``.
+            python_arg_mode = True
+            continue
+
+        if python_arg_mode:
+            if raw_part == "-c":
+                skip_next_python_code = True
+                continue
+            if raw_part.startswith("-c") and len(raw_part) > 2:
+                python_arg_mode = False
+                continue
+            if raw_part.startswith("-"):
+                continue
+            python_arg_mode = False
+
         for candidate in _path_candidates_from_shell_token(raw_part):
             if candidate and candidate not in seen:
                 seen.add(candidate)
                 out.append(candidate)
     return out
+
+
+def _is_python_executable_token(raw_value: str) -> bool:
+    value = raw_value.strip().strip("'\"")
+    return bool(_PYTHON_EXECUTABLE_RE.fullmatch(Path(value).name))
 
 
 def _path_candidates_from_shell_token(raw_value: str) -> list[str]:
