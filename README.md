@@ -156,6 +156,9 @@ Core regression coverage currently includes:
 - mode lifecycle audit for `validate_only` entry / clear
 - block-driven mode-transition audit for `missing_evidence` and `low_signal_repeat`
 - `forward_progress_reopened` semantics after successful validation
+- shell-assignment and `/dev/null` redirection filtering so command parsing does not create phantom validation targets
+- directory-target readback overlap so a child file inspection can clear a coarse directory validation target
+- compatibility wording that keeps Proofrail handoffs actionable for agents (`Fastest valid next action`, allowed / forbidden menus, current-subtask framing)
 - end-to-end behavior simulation and local self-smoke of the cooperative runtime path
 
 Run the local verification lane with:

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Harden cooperative `validate_only` recovery so shell assignment tokens (`NAME=/path`) and suppression redirects (`2>/dev/null`) are not recorded as phantom touched paths, while real output redirections still produce validation targets.
+- Allow directory-level pending-verification targets to be cleared by direct child-path readback, preventing impossible validation loops when command heuristics can only identify a coarse directory target.
+- Restore compatibility wording in Proofrail handoff panels (`Fastest valid next action`, allowed/forbidden action menus, and “current subtask” framing) so blocked tool calls remain actionable for agents.
 - Fix the `ask_user` / `user_choice` approval flow so an explicit user confirmation can approve exactly one matching mutation, consume that approval once, and avoid getting clobbered by unrelated follow-up mutations.
 - Add regression coverage for clarify-driven approval consumption and tighten the phase-6 smoke script so it can import the local package reliably when run from `scripts/`.
 

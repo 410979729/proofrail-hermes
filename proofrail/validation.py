@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+import shlex
 from pathlib import Path
 from typing import Iterable
 
@@ -15,6 +17,8 @@ _SHELL_SUFFIXES = {".sh", ".bash", ".zsh"}
 _YAML_SUFFIXES = {".yaml", ".yml"}
 _JSON_SUFFIXES = {".json"}
 _DOC_SUFFIXES = {".md", ".rst", ".txt"}
+_SHELL_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\+?=")
+_REDIRECT_PREFIX_RE = re.compile(r"^(?P<op>\d*(?:>>?|<<?)|&>|\d*>&)(?P<target>.*)$")
 
 
 def changed_path_hints(tool_name: str, args: dict[str, object], command: str = "") -> list[str]:
@@ -24,9 +28,10 @@ def changed_path_hints(tool_name: str, args: dict[str, object], command: str = "
         return hints
     if command:
         # Keep this deliberately conservative. We only extract obvious script/file
-        # names for validation suggestions; this is not a shell parser.
-        parts = [part.strip("'\"") for part in command.split()]
-        return [part for part in parts if _looks_like_path(part)]
+        # names for validation suggestions; this is not a shell parser.  Shell
+        # syntax tokens are filtered so validate_only cannot get poisoned by
+        # phantom targets such as ``KEY=/path`` or ``2>/dev/null``.
+        return _command_path_hints(command)
     return []
 
 
@@ -68,6 +73,55 @@ def summarize_paths(paths: Iterable[str], *, limit: int = 8) -> list[str]:
     if len(out) <= limit:
         return out
     return [*out[:limit], f"... {len(out) - limit} more"]
+
+
+def _command_path_hints(command: str) -> list[str]:
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        parts = command.split()
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw_part in parts:
+        for candidate in _path_candidates_from_shell_token(raw_part):
+            if candidate and candidate not in seen:
+                seen.add(candidate)
+                out.append(candidate)
+    return out
+
+
+def _path_candidates_from_shell_token(raw_value: str) -> list[str]:
+    value = raw_value.strip().strip("'\"`).,;(){}[]")
+    if not value or value in {"|", "||", "&", "&&", ";"}:
+        return []
+    if value.startswith(("http://", "https://")):
+        return []
+    if value.startswith("-"):
+        return []
+    # Environment / shell assignment prefixes are context, not touched paths.
+    # Keep the whole token ignored so ``PLUGIN=/path`` cannot become either
+    # ``PLUGIN=/path`` or ``/path`` as a pending-verification target.
+    if _SHELL_ASSIGNMENT_RE.match(value):
+        return []
+    if value.startswith(("$", "${")):
+        return []
+
+    redirect_match = _REDIRECT_PREFIX_RE.match(value)
+    if redirect_match:
+        target = redirect_match.group("target").strip().strip("'\"")
+        if not target or target.startswith(("&", "$")) or target == "/dev/null":
+            return []
+        value = target
+
+    wrapper_match = re.fullmatch(r"(?:PosixPath|WindowsPath|Path)\((?P<quote>['\"])(?P<inner>.*?)(?P=quote)\)", value)
+    if wrapper_match:
+        value = wrapper_match.group("inner")
+    if value == "/dev/null" or value.startswith("/dev/fd/"):
+        return []
+    if _looks_like_path(value):
+        return [value]
+    return []
 
 
 def _looks_like_path(value: str) -> bool:

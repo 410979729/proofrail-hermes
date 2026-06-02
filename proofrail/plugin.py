@@ -153,14 +153,41 @@ def _normalize_path_hint(path_hint: str, base_dir: str | None) -> str | None:
         return None
 
 
+def _paths_overlap(left: str, right: str) -> bool:
+    if left == right:
+        return True
+    try:
+        left_path = Path(left)
+        right_path = Path(right)
+        # Exact equality is ideal, but directory targets are common when a
+        # mutation command can only be classified coarsely. Let a direct child
+        # readback or a parent-directory stat clear validate_only so the
+        # cooperative handoff cannot become an impossible deadlock.
+        if left_path.exists() and left_path.is_dir():
+            try:
+                right_path.relative_to(left_path)
+                return True
+            except ValueError:
+                pass
+        if right_path.exists() and right_path.is_dir():
+            try:
+                left_path.relative_to(right_path)
+                return True
+            except ValueError:
+                pass
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return False
+
+
 def _path_hints_overlap(left: tuple[str, ...] | list[str], right: tuple[str, ...] | list[str], base_dir: str | None) -> bool:
     if not left or not right:
         return False
-    left_paths = {_normalize_path_hint(path, base_dir) for path in left}
-    right_paths = {_normalize_path_hint(path, base_dir) for path in right}
-    left_paths.discard(None)
-    right_paths.discard(None)
-    return bool(left_paths & right_paths)
+    left_paths_raw = {_normalize_path_hint(path, base_dir) for path in left}
+    right_paths_raw = {_normalize_path_hint(path, base_dir) for path in right}
+    left_paths = {path for path in left_paths_raw if path is not None}
+    right_paths = {path for path in right_paths_raw if path is not None}
+    return any(_paths_overlap(left_path, right_path) for left_path in left_paths for right_path in right_paths)
 
 
 def _exec_program(command: str) -> str:
@@ -284,6 +311,8 @@ def _render_block_message(
         "Recommended next step:",
         *[f"- {item}" for item in normalized_next_actions],
         "- One direct check is enough before continuing",
+        "Fastest valid next action:",
+        f"- {smallest_next_action}",
         "Smallest next action:",
         f"- {smallest_next_action}",
         "Enough when:",
@@ -322,14 +351,21 @@ def _render_task_panel(state) -> str:
     allowed = list(state.allowed_next_actions) or ["perform the narrowest action that satisfies the current subgoal"]
     lines.extend(f"- {item}" for item in allowed)
     lines.append("")
+    lines.append("allowed next actions:")
+    lines.extend(f"- {item}" for item in allowed)
+    lines.append("")
     lines.append("avoid right now:")
     forbidden = list(state.forbidden_next_actions) or ["broad replanning before satisfying the current subgoal"]
+    lines.extend(f"- {item}" for item in forbidden)
+    lines.append("")
+    lines.append("forbidden next actions:")
     lines.extend(f"- {item}" for item in forbidden)
     lines.extend(
         [
             "",
             "important:",
             f"- {_mode_specific_handoff_line(state, target)}",
+            "- Treat this as the current subtask, not as resistance.",
             "- This handoff is part of the task, not a refusal.",
             "- The fastest path forward is to satisfy this subgoal directly.",
             "- Complete this subtask to reopen forward progress.",
