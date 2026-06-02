@@ -142,9 +142,9 @@ Responsibilities:
 - inject phase summaries and runtime reminders
 - append context rather than rewriting the system prompt
 
-## Current v0.0.4 cooperative runtime release line
+## Current v0.0.5 cooperative runtime release line
 
-The public `v0.0.4` / `0.0.4` release line includes:
+The public `v0.0.5` / `0.0.5` release line includes:
 
 1. default `dangerous_command_action=warn`; high-risk commands stay out of a manual approval loop, but they are audited and paired with self-verification reminders
 2. a JSONL audit trail for session lifecycle, tool preflight, dangerous commands, tool results, and large-output summarization
@@ -157,12 +157,13 @@ The public `v0.0.4` / `0.0.4` release line includes:
 9. classifier-to-mode mapping so gray-area decisions become concrete runtime submodes
 10. `forced_mode_transition` audit events from classifier, block, and tool-observation sources
 11. `forward_progress_reopened` semantics when validation clears `validate_only`
-12. behavior-simulation and self-smoke coverage for the cooperative path
+12. phantom-target recovery hardening for shell assignment tokens, suppression redirects, directory-level targets, and handoff wording compatibility
+13. behavior-simulation and self-smoke coverage for the cooperative path
 
 ## Version semantics
 
-- GitHub release/tag line: `v0.0.4`
-- Python package version: `0.0.4`
+- GitHub release/tag line: `v0.0.5`
+- Python package version: `0.0.5`
 
 This split is intentional: GitHub tags keep the leading `v`, while Python packaging follows PEP 440.
 

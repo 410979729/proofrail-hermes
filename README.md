@@ -36,13 +36,13 @@ For Hermes, that means a runtime plugin that can:
 
 ## Current status
 
-- Version: `v0.0.4`
+- Version: `v0.0.5`
 - Host: **Hermes Agent plugin hooks**
 - Language: **Python**
 
-> Version note: the GitHub release/tag line is `v0.0.4`, while the Python package and wheel version is `0.0.4` to follow PEP 440. They refer to the same release.
+> Version note: the GitHub release/tag line is `v0.0.5`, while the Python package and wheel version is `0.0.5` to follow PEP 440. They refer to the same release.
 
-The current main branch is the cooperative-runtime `v0.0.4` line: explicit forced modes, classifier fallback/mode mapping, mode-transition audit, and forward-progress reopen signaling are now part of the release baseline.
+The current main branch is the cooperative-runtime `v0.0.5` line: explicit forced modes, classifier fallback/mode mapping, mode-transition audit, forward-progress reopen signaling, and phantom-target recovery hardening are now part of the release baseline.
 
 ## Quick start
 
