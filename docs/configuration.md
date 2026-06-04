@@ -1,6 +1,6 @@
 # Configuration
 
-The plugin works without configuration. The default behavior is optimized for autonomous Hermes instances: dangerous commands are not sent into a manual approval loop by default; they stay in autonomous warn/audit mode, but they are still blocked whenever the normal workflow guardrails require evidence first or validation first.
+The plugin works without configuration. The default behavior is optimized for autonomous Hermes instances: `enforcement_mode` defaults to `advisory`, so workflow risks are recorded as compact next-action advisories instead of blocking the tool call. Dangerous commands default to `warn`, which records advisory + audit and allows the command unless you choose a stricter command policy.
 
 If your Hermes build exposes plugin config through `plugins.entries`, use this shape:
 
@@ -10,6 +10,10 @@ plugins:
     - proofrail
   entries:
     proofrail:
+      enforcement_mode: advisory
+      advisory_injection: compact
+      validation_policy: batch
+      mutation_batch_max: 5
       dangerous_command_action: warn
       summary_threshold_chars: 8000
       low_signal_block_threshold: 2
@@ -28,6 +32,35 @@ plugins:
 ```
 
 ## Options
+
+### `enforcement_mode`
+
+Allowed values:
+
+- `advisory` — default. Workflow risks are recorded, audited, and injected as compact next-action guidance; the tool call continues.
+- `strict` — preserve the older hard-block/cooperative-mode behavior for missing evidence, pending verification, broad evidence, and repeated low-signal probes.
+- `guarded` — reserved compatibility label; currently behaves like advisory for workflow risks while command policy remains active.
+- `off` — disable workflow-risk advisories/blocks while leaving other plugin plumbing available.
+
+### `advisory_injection`
+
+Allowed values:
+
+- `compact` — default. Inject a short advisory action card when there is an open advisory.
+- `full` — keep the broader runtime context/task panel style.
+- `off` — do not inject advisory cards; state and audit still update.
+
+### `validation_policy`
+
+Allowed values:
+
+- `batch` — default. Track unverified mutations and escalate advisory severity as the batch grows.
+- `after_each_mutation` — compatibility spelling for immediate validation expectations; old `immediate` config values are mapped here.
+- `off` — do not track pending-verification state and do not create pending-verification workflow advisories/blocks. Mutation counts and audit/final-report state still update.
+
+### `mutation_batch_max`
+
+Maximum unverified mutation batch size before advisory severity escalates. Defaults to `5` and is clamped between `1` and `20`.
 
 ### `dangerous_command_action`
 
@@ -48,7 +81,7 @@ The value is clamped between 1000 and 50000.
 
 ### `low_signal_block_threshold`
 
-How many repeated low-signal observations with the same intent are allowed before blocking repeated probes.
+How many repeated low-signal observations with the same intent are allowed before Proofrail raises a repeated-probe workflow risk. Default mode records guidance; `strict` mode blocks the repeated probe.
 
 The value is clamped between 1 and 20.
 

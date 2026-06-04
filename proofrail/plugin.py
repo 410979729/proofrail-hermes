@@ -25,13 +25,14 @@ from .classifier import (
     should_run_classifier,
 )
 from .constants import PLUGIN_NAME
-from .models import LlmContextResult, PluginSettings
+from .models import LlmContextResult, PluginSettings, ProofrailAdvisory
 from .path_utils import mutates_existing_path
 from .result_status import get_tool_result_status
 from .session_state import (
     STATE_STORE,
     build_tool_intent_signature,
     clear_classifier_decision,
+    record_advisory,
     record_block_decision,
     record_classifier_decision,
     record_dangerous_command,
@@ -243,6 +244,74 @@ def _has_risk(state, low_signal_threshold: int) -> bool:
     return False
 
 
+def _recent_unique_advisories(state, *, limit: int = 3):
+    """Return recent distinct advisories, newest first."""
+    seen: set[str] = set()
+    out = []
+    for advisory in reversed(state.advisories):
+        key = advisory.reason
+        if key in seen:
+            continue
+        out.append(advisory)
+        seen.add(key)
+        if len(out) >= limit:
+            break
+    if not out and state.last_advisory is not None:
+        out.append(state.last_advisory)
+    return out
+
+
+def _has_target_local_evidence(state, target_hints: list[str] | tuple[str, ...], root_dir: str | None) -> bool:
+    if not target_hints:
+        return state.evidence_count > 0
+    return _path_hints_overlap(state.evidence_paths, target_hints, root_dir)
+
+
+def _render_compact_advisory_context(state) -> str:
+    base = _compact_context(state)
+    advisories = _recent_unique_advisories(state)
+    if not advisories:
+        return base
+    primary = advisories[0]
+    lines = [
+        base,
+        "",
+        "## [PROOFRAIL ADVISORY — not user input]",
+        f"- Proofrail advisory [{primary.reason}]: {primary.message}",
+    ]
+    if primary.target:
+        lines.append(f"- target: {primary.target}")
+    if primary.mode != "none":
+        lines.append(f"- mode hint: {primary.mode}")
+    if primary.fastest_next_action:
+        lines.append(f"- fastest next action: {primary.fastest_next_action}")
+    for related in advisories[1:]:
+        lines.append(f"- related advisory [{related.reason}]: {related.message}")
+        if related.fastest_next_action:
+            lines.append(f"  fastest next action: {related.fastest_next_action}")
+    lines.append("- Advisory mode does not block this tool call; use the fastest next action to reduce risk.")
+    return "\n".join(lines)
+
+
+def _render_advisory_message(
+    *,
+    reason: str,
+    mode: str,
+    target: str,
+    why: str,
+    fastest_next_action: str,
+) -> str:
+    return "\n".join(
+        [
+            f"Proofrail advisory [{reason}]",
+            f"Proofrail mode hint: {mode}",
+            f"Target: {target}",
+            f"Why advisory now: {why}",
+            f"fastest next action: {fastest_next_action}",
+        ]
+    )
+
+
 def _compact_context(state) -> str:
     from .task_ledger import task_status
 
@@ -384,6 +453,14 @@ def _render_task_panel(state) -> str:
             f"- Phase: {state.phase} | task: {status}",
         ]
     )
+
+    advisories = _recent_unique_advisories(state)
+    if advisories:
+        lines.extend(["", "## [SYSTEM STATUS — active advisories]"])
+        for advisory in advisories:
+            lines.append(f"- [{advisory.reason}] {advisory.message}")
+            if advisory.fastest_next_action:
+                lines.append(f"  fastest next action: {advisory.fastest_next_action}")
 
     if state.phase == "observe":
         lines.append("- Do not start by reading plugin internals or full audit history.")
@@ -691,12 +768,15 @@ class RuntimeHooks:
             "plugin": PLUGIN_NAME,
             "phase": state.phase,
             "evidence_count": state.evidence_count,
+            "evidence_paths": list(state.evidence_paths),
             "pending_verification": state.pending_verification,
             "last_evidence_label": state.last_evidence_label,
             "last_mutation_label": state.last_mutation_label,
             "consecutive_low_signal": state.consecutive_low_signal,
             "last_low_signal_intent": state.last_low_signal_intent,
             "mutation_count": state.mutation_count,
+            "unverified_mutation_count": state.unverified_mutation_count,
+            "mutation_batch_id": state.mutation_batch_id,
             "validation_count": state.validation_count,
             "dangerous_count": state.dangerous_count,
             "last_dangerous_label": state.last_dangerous_label,
@@ -721,6 +801,12 @@ class RuntimeHooks:
             "last_classifier_source": state.last_classifier_source,
             "pending_user_choice_signature": state.pending_user_choice_signature,
             "approved_mutation_signature": state.approved_mutation_signature,
+            "enforcement_mode": self.settings.enforcement_mode,
+            "advisories": [asdict(item) for item in state.advisories],
+            "last_advisory": asdict(state.last_advisory) if state.last_advisory else None,
+            "advisory_count": state.advisory_count,
+            "ignored_advisory_count": state.ignored_advisory_count,
+            "last_advisory_reason": state.last_advisory_reason,
             "task": task_snapshot(state),
             "next_expected": next_expected,
             "audit_log_path": str(self.audit.path) if self.audit.path else None,
@@ -755,6 +841,62 @@ class RuntimeHooks:
         self.audit.record("task_summary", session_id=session_id or "default", **summary)
         STATE_STORE.clear(session_id)
 
+    def _advisory(
+        self,
+        session_id: str,
+        *,
+        reason: str,
+        message: str,
+        severity: str = "warn",
+        target: str | None = None,
+        fastest_next_action: str | None = None,
+        allowed_next_actions: tuple[str, ...] | list[str] = (),
+        risk_if_ignored: str = "The agent may continue with stale or incomplete execution context.",
+        source: str = "workflow",
+        tool_name: str = "",
+        tool_intent: str = "",
+        command: str = "",
+        evidence_gap: str | None = None,
+        would_have_blocked_in_strict: bool = False,
+        mode: str = "none",
+    ):
+        advisory = ProofrailAdvisory(
+            reason=reason,
+            severity=severity,
+            target=target,
+            message=message,
+            fastest_next_action=fastest_next_action,
+            allowed_next_actions=tuple(str(item) for item in allowed_next_actions if str(item or "").strip()) or ((fastest_next_action,) if fastest_next_action else ()),
+            risk_if_ignored=risk_if_ignored,
+            source=source,
+            tool_name=tool_name or None,
+            tool_intent=tool_intent or None,
+            command=command or None,
+            evidence_gap=evidence_gap,
+            would_have_blocked_in_strict=would_have_blocked_in_strict,
+            mode=mode,  # type: ignore[arg-type]
+        )
+        state = record_advisory(session_id, advisory)
+        payload = {
+            "session_id": session_id or "default",
+            "reason": advisory.reason,
+            "severity": advisory.severity,
+            "target": advisory.target,
+            "message": advisory.message,
+            "fastest_next_action": advisory.fastest_next_action,
+            "allowed_next_actions": list(advisory.allowed_next_actions),
+            "risk_if_ignored": advisory.risk_if_ignored,
+            "source": advisory.source,
+            "tool_name": advisory.tool_name,
+            "command": advisory.command,
+            "evidence_gap": advisory.evidence_gap,
+            "would_have_blocked_in_strict": advisory.would_have_blocked_in_strict,
+            "enforcement_mode": self.settings.enforcement_mode,
+        }
+        self.audit.record("advisory", **payload)
+        self.audit.record("tool_advisory", **payload)
+        return state
+
     def pre_tool_call(self, tool_name: str = "", args: dict[str, Any] | None = None, session_id: str = "", **_: Any) -> HookDecision | None:
         payload = args or {}
         state = STATE_STORE.snapshot(session_id)
@@ -764,8 +906,11 @@ class RuntimeHooks:
         mutation_touches_existing_path = category == "write" and mutates_existing_path(payload, base_dir=self.root_dir)
         is_mutation = category == "write" or mutating_exec
         tool_intent = build_tool_intent_signature(tool_name, payload, self.tool_aliases)
-        target_hints = list(state.touched_files) or changed_path_hints(tool_name, payload, command)
+        mutation_target_hints = changed_path_hints(tool_name, payload, command)
+        target_hints = list(state.touched_files) or mutation_target_hints
         target_label = compact_label(target_hints[0], 120) if target_hints else compact_label(state.last_mutation_label or "the current target", 120)
+        strict_mode = self.settings.enforcement_mode == "strict"
+        advisory_enabled = self.settings.enforcement_mode != "off"
 
         approved_user_choice = bool(
             state.approved_mutation_signature
@@ -796,6 +941,22 @@ class RuntimeHooks:
                     reason="dangerous_command_approve",
                 )
             if self.settings.dangerous_command_action == "warn":
+                if advisory_enabled:
+                    self._advisory(
+                        session_id,
+                        reason="dangerous_command",
+                        severity="risk",
+                        target=label,
+                        message=f"High-risk command detected: {label}",
+                        fastest_next_action="review the command risk before continuing",
+                        allowed_next_actions=("review command risk", "ask user for explicit approval", "choose a safer reversible command"),
+                        risk_if_ignored="The command may make destructive or hard-to-recover changes.",
+                        source="dangerous_command",
+                        tool_name=tool_name,
+                        tool_intent=tool_intent,
+                        command=command,
+                        would_have_blocked_in_strict=True,
+                    )
                 self.audit.record("tool_warning", session_id=session_id or "default", tool_name=tool_name, warning=f"dangerous command allowed with audit if workflow checks pass: {label}")
             elif self.settings.dangerous_command_action == "allow":
                 self.audit.record("tool_decision", session_id=session_id or "default", tool_name=tool_name, decision={"action": "allow"}, reason="dangerous_command_allow_if_workflow_checks_pass")
@@ -838,6 +999,45 @@ class RuntimeHooks:
             )
             return None
 
+        if state.pending_verification and is_mutation and self.settings.validation_policy != "off":
+            pending_target = compact_label((state.touched_files[0] if state.touched_files else target_label) or state.last_mutation_label or "recent mutation", 120)
+            fastest = f"validate {pending_target} with the narrowest check"
+            if strict_mode:
+                message = _render_block_message(
+                    reason="pending_verification",
+                    mode="validate_only",
+                    target=pending_target,
+                    why_blocked=f"the last change on {pending_target} is not yet verified",
+                    subgoal=f"verify the last change on {pending_target}",
+                    next_actions=(
+                        "read back the touched path directly",
+                        "run one narrow validation command against the same touched path/process",
+                        f"read back {pending_target} directly",
+                        fastest,
+                    ),
+                    done_when=(f"confirm the last change on {pending_target} landed as intended",),
+                    avoid=("further mutation", "alternate tools for the same mutation", "broad search or replanning"),
+                )
+                return self._blocked(session_id, tool_name, payload, message, reason="pending_verification")
+            if advisory_enabled:
+                self._advisory(
+                    session_id,
+                    reason="pending_verification",
+                    severity="risk" if state.unverified_mutation_count >= self.settings.mutation_batch_max else "warn",
+                    target=pending_target,
+                    message="A previous mutation has not been validated yet.",
+                    fastest_next_action=fastest,
+                    allowed_next_actions=(f"read back {pending_target} directly", fastest),
+                    risk_if_ignored="Multiple unverified mutations can hide the real source of a failure.",
+                    source="workflow",
+                    tool_name=tool_name,
+                    tool_intent=tool_intent,
+                    command=command,
+                    evidence_gap="narrow_validation",
+                    would_have_blocked_in_strict=True,
+                    mode="validate_only",
+                )
+
         if state.forced_next_mode == "validate_only":
             allowed_readback = _readback_validates_touched_file(
                 category=category,
@@ -873,84 +1073,158 @@ class RuntimeHooks:
                 return self._blocked(session_id, tool_name, payload, message, reason="pending_verification")
 
         if state.evidence_count == 0 and (mutating_exec or mutation_touches_existing_path):
-            target_hints = changed_path_hints(tool_name, payload, command)
+            target_hints = mutation_target_hints
             target_label = compact_label(target_hints[0], 120) if target_hints else compact_label(state.last_mutation_label or "the target path/process", 120)
-            previous_mode = state.forced_next_mode
-            set_forced_next_mode(
-                session_id,
-                mode="gather_target_evidence",
-                target=target_label,
-                why="Target-local evidence prevents blind edits and reduces rework.",
-                exit_condition="obtain one concrete local fact about the target state",
-                allowed_actions=(
-                    f"inspect {target_label} directly",
-                    f"inspect the closest config, log, or test on the same control path as {target_label}",
-                ),
-                forbidden_actions=(
-                    "start with plugin internals",
-                    "read plugin tests/config",
-                    "broad search or full audit/gateway history",
-                ),
-            )
-            message = _render_block_message(
-                reason="missing_evidence",
-                mode="gather_target_evidence",
-                target=target_label,
-                why_blocked=f"no target-local evidence exists yet for {target_label}",
-                subgoal="inspect the real target before mutating it",
-                next_actions=(
-                    f"directly inspect {target_label}",
-                    "inspect the closest control-path artifact",
-                    f"inspect {target_label} directly",
-                    f"inspect the closest config, log, or test on the same control path as {target_label}",
-                ),
-                done_when=("obtain one concrete local fact about the target state",),
-                avoid=(
-                    "plugin internals, plugin tests, or plugin config",
-                    "broad search or full audit/gateway history",
-                    "broaden scope before the first direct check",
-                ),
-            )
-            payload["_proofrail_previous_mode"] = previous_mode
-            return self._blocked(session_id, tool_name, payload, message, reason="missing_evidence")
+            fastest = f"inspect {target_label} directly"
+            if strict_mode:
+                previous_mode = state.forced_next_mode
+                set_forced_next_mode(
+                    session_id,
+                    mode="gather_target_evidence",
+                    target=target_label,
+                    why="Target-local evidence prevents blind edits and reduces rework.",
+                    exit_condition="obtain one concrete local fact about the target state",
+                    allowed_actions=(
+                        fastest,
+                        f"inspect the closest config, log, or test on the same control path as {target_label}",
+                    ),
+                    forbidden_actions=(
+                        "start with plugin internals",
+                        "read plugin tests/config",
+                        "broad search or full audit/gateway history",
+                    ),
+                )
+                message = _render_block_message(
+                    reason="missing_evidence",
+                    mode="gather_target_evidence",
+                    target=target_label,
+                    why_blocked=f"no target-local evidence exists yet for {target_label}",
+                    subgoal="inspect the real target before mutating it",
+                    next_actions=(
+                        f"directly inspect {target_label}",
+                        "inspect the closest control-path artifact",
+                        fastest,
+                        f"inspect the closest config, log, or test on the same control path as {target_label}",
+                    ),
+                    done_when=("obtain one concrete local fact about the target state",),
+                    avoid=(
+                        "plugin internals, plugin tests, or plugin config",
+                        "broad search or full audit/gateway history",
+                        "broaden scope before the first direct check",
+                    ),
+                )
+                payload["_proofrail_previous_mode"] = previous_mode
+                return self._blocked(session_id, tool_name, payload, message, reason="missing_evidence")
+            if advisory_enabled:
+                self._advisory(
+                    session_id,
+                    reason="missing_evidence",
+                    severity="risk",
+                    target=target_label,
+                    message="No target-local evidence exists before mutating an existing target.",
+                    fastest_next_action=fastest,
+                    allowed_next_actions=(fastest, f"inspect the closest config, log, or test on the same control path as {target_label}"),
+                    risk_if_ignored="The agent may modify a file or process based on stale or unrelated assumptions.",
+                    source="workflow",
+                    tool_name=tool_name,
+                    tool_intent=tool_intent,
+                    command=command,
+                    evidence_gap="target_state",
+                    would_have_blocked_in_strict=True,
+                    mode="gather_target_evidence",
+                )
+
+        if state.evidence_count > 0 and (mutating_exec or mutation_touches_existing_path) and not _has_target_local_evidence(state, mutation_target_hints, self.root_dir):
+            broad_target = compact_label(mutation_target_hints[0], 120) if mutation_target_hints else target_label
+            fastest = f"inspect {broad_target} directly"
+            if strict_mode:
+                message = _render_block_message(
+                    reason="broad_evidence",
+                    mode="gather_target_evidence",
+                    target=broad_target,
+                    why_blocked=f"existing evidence does not overlap {broad_target}",
+                    subgoal="inspect the real target before mutating it",
+                    next_actions=(fastest, f"inspect the closest config, log, or test on the same control path as {broad_target}"),
+                    done_when=("obtain one concrete local fact about the target state",),
+                    avoid=("mutate based on unrelated evidence", "route around the target-local evidence requirement"),
+                )
+                return self._blocked(session_id, tool_name, payload, message, reason="broad_evidence")
+            if advisory_enabled:
+                self._advisory(
+                    session_id,
+                    reason="broad_evidence",
+                    severity="risk",
+                    target=broad_target,
+                    message="Existing evidence does not overlap the mutation target.",
+                    fastest_next_action=fastest,
+                    allowed_next_actions=(fastest, f"inspect the closest config, log, or test on the same control path as {broad_target}"),
+                    risk_if_ignored="The agent may modify a target based on stale or unrelated assumptions.",
+                    source="workflow",
+                    tool_name=tool_name,
+                    tool_intent=tool_intent,
+                    command=command,
+                    evidence_gap="target_state",
+                    would_have_blocked_in_strict=True,
+                    mode="gather_target_evidence",
+                )
 
         if state.consecutive_low_signal >= self.settings.low_signal_block_threshold and state.last_low_signal_intent == tool_intent:
-            previous_mode = state.forced_next_mode
-            set_forced_next_mode(
-                session_id,
-                mode="change_strategy",
-                target=target_label,
-                why="This is a request for one different probe shape, not more investigation volume.",
-                exit_condition="make one different target-local probe that yields a new fact",
-                allowed_actions=("switch the probe shape once while staying on the same target",),
-                forbidden_actions=("repeat the same probe", "broaden scope", "re-plan the whole task"),
-            )
-            payload["_proofrail_previous_mode"] = previous_mode
-            return self._blocked(
-                session_id,
-                tool_name,
-                payload,
-                _render_block_message(
-                    reason="low_signal_repeat",
+            fastest = f"Switch paths or probe shape once while staying on {target_label}"
+            if strict_mode:
+                previous_mode = state.forced_next_mode
+                set_forced_next_mode(
+                    session_id,
                     mode="change_strategy",
                     target=target_label,
-                    why_blocked="recent probes repeated the same intent without producing new facts; switch paths, keywords, logs, hosts, sources, or validation method once",
-                    subgoal=f"switch probe shape once while staying on {target_label}",
-                    next_actions=(
-                        f"Switch paths or probe shape once while staying on {target_label}",
-                        f"make one different target-local probe against {target_label}",
-                        f"inspect the immediate file, path, process, or config snippet for {target_label}",
+                    why="This is a request for one different probe shape, not more investigation volume.",
+                    exit_condition="make one different target-local probe that yields a new fact",
+                    allowed_actions=("switch the probe shape once while staying on the same target",),
+                    forbidden_actions=("repeat the same probe", "broaden scope", "re-plan the whole task"),
+                )
+                payload["_proofrail_previous_mode"] = previous_mode
+                return self._blocked(
+                    session_id,
+                    tool_name,
+                    payload,
+                    _render_block_message(
+                        reason="low_signal_repeat",
+                        mode="change_strategy",
+                        target=target_label,
+                        why_blocked="recent probes repeated the same intent without producing new facts; switch paths, keywords, logs, hosts, sources, or validation method once",
+                        subgoal=f"switch probe shape once while staying on {target_label}",
+                        next_actions=(
+                            fastest,
+                            f"make one different target-local probe against {target_label}",
+                            f"inspect the immediate file, path, process, or config snippet for {target_label}",
+                        ),
+                        done_when=("obtain one new fact from a different probe shape",),
+                        avoid=(
+                            "repeat the same probe through another tool",
+                            "broaden scope",
+                            "re-plan the whole task",
+                            "plugin internals or full audit/gateway history",
+                        ),
                     ),
-                    done_when=("obtain one new fact from a different probe shape",),
-                    avoid=(
-                        "repeat the same probe through another tool",
-                        "broaden scope",
-                        "re-plan the whole task",
-                        "plugin internals or full audit/gateway history",
-                    ),
-                ),
-                reason="low_signal_repeat",
-            )
+                    reason="low_signal_repeat",
+                )
+            if advisory_enabled:
+                self._advisory(
+                    session_id,
+                    reason="low_signal_repeat",
+                    severity="warn",
+                    target=target_label,
+                    message="Recent tool calls did not produce new facts.",
+                    fastest_next_action=fastest,
+                    allowed_next_actions=(fastest, "change keyword", "change log source", "change validation method"),
+                    risk_if_ignored="Repeating the same low-signal path wastes turns and can miss the real control path.",
+                    source="workflow",
+                    tool_name=tool_name,
+                    tool_intent=tool_intent,
+                    command=command,
+                    evidence_gap="strategy_shift",
+                    would_have_blocked_in_strict=True,
+                    mode="change_strategy",
+                )
 
         clear_classifier_decision(session_id)
         classifier = self.classifier
@@ -1081,6 +1355,8 @@ class RuntimeHooks:
             tool_aliases=self.tool_aliases,
             touched_paths=touched_paths,
             validation_suggestions=validation_suggestions,
+            enforce_forced_modes=self.settings.enforcement_mode == "strict",
+            track_verification=self.settings.validation_policy != "off",
         )
         if tool_name == "clarify" and prior_state.pending_user_choice_signature and not error_text.strip() and _looks_like_affirmative_choice(text):
             def _approve_user_choice(current) -> None:
@@ -1154,7 +1430,13 @@ class RuntimeHooks:
 
     def pre_llm_call(self, session_id: str = "", **_: Any) -> dict[str, str]:
         state = STATE_STORE.snapshot(session_id)
-        if state.forced_next_mode != "none":
+        if self.settings.advisory_injection == "off":
+            extra = _compact_context(state)
+        elif self.settings.advisory_injection == "compact" and state.last_advisory and not state.last_block_message:
+            extra = _render_compact_advisory_context(state)
+        elif self.settings.advisory_injection == "full" and state.last_advisory and not state.last_block_message:
+            extra = _render_task_panel(state)
+        elif state.forced_next_mode != "none":
             extra = _render_task_panel(state)
         elif _has_risk(state, self.settings.low_signal_block_threshold):
             extra = _render_task_panel(state)

@@ -1,16 +1,27 @@
 from __future__ import annotations
 from proofrail.summarize import summarize_large_output
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from proofrail import build_runtime_hooks, register
+from proofrail import build_runtime_hooks as _build_runtime_hooks, register
 from proofrail.classifier import HermesLlmGuardrailClassifier
 from proofrail.models import PluginSettings
 from proofrail.result_status import get_tool_result_status
 from proofrail.settings import settings_from_mapping
 from proofrail.tooling import get_exec_command, get_tool_category, is_dangerous_command
+
+
+def build_runtime_hooks(*args, settings: PluginSettings | None = None, **kwargs):
+    """Legacy blocker-regression suite: exercise strict mode explicitly.
+
+    Non-blocking default behavior is covered in test_advisory_runtime.py.
+    """
+
+    strict_settings = PluginSettings(enforcement_mode="strict") if settings is None else replace(settings, enforcement_mode="strict")
+    return _build_runtime_hooks(*args, settings=strict_settings, **kwargs)
 
 
 class FakeCtx:
@@ -503,7 +514,7 @@ def test_llm_classifier_can_block_gray_area_mutation(tmp_path: Path) -> None:
 
     hooks = build_runtime_hooks(root_dir=str(tmp_path), classifier=fake_classifier)
     session_id = "classifier-gray-block"
-    hooks.post_tool_call("search_files", {"query": "module"}, "module.py", session_id=session_id)
+    hooks.post_tool_call("read_file", {"path": "module.py"}, "print('old')\n", session_id=session_id)
 
     blocked = hooks.pre_tool_call(
         "write_file",
@@ -943,8 +954,6 @@ def test_real_hermes_load_config_fallback_is_read(monkeypatch):
 
 
 def test_write_with_cwd_relative_existing_file_requires_evidence(tmp_path):
-    from proofrail.plugin import build_runtime_hooks
-
     cwd = tmp_path / "src"
     cwd.mkdir()
     target = cwd / "app.py"

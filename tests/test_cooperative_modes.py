@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from proofrail import build_runtime_hooks
+from proofrail import build_runtime_hooks as _build_runtime_hooks
+from proofrail.models import PluginSettings
 from proofrail.session_state import STATE_STORE
+
+
+def build_runtime_hooks(*args, settings: PluginSettings | None = None, **kwargs):
+    strict_settings = PluginSettings(enforcement_mode="strict") if settings is None else replace(settings, enforcement_mode="strict")
+    return _build_runtime_hooks(*args, settings=strict_settings, **kwargs)
 
 
 @pytest.fixture(autouse=True)

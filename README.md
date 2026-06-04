@@ -6,8 +6,9 @@ If you're searching for a **Codex harness**, a **Claude Code harness**, or a gen
 
 It adds a repeatable execution process around tool use:
 
-- gather evidence before editing existing files or mutating local state
-- validate after every change before the next mutation
+- record advisory risk before mutating existing files or local state
+- remind the agent to validate after changes before stacking more mutation
+- keep strict hard-block behavior available as an explicit compatibility mode
 - track session workflow state with **Observe / Execute / Review**
 - detect and handle high-risk commands with extra scrutiny
 - summarize oversized tool output before it pollutes model context
@@ -27,8 +28,8 @@ It does not try to replace the model. It changes how the agent works during real
 
 For Hermes, that means a runtime plugin that can:
 
-- block existing-file edits when there is no nearby evidence
-- require validation before the next mutation
+- record advisory risk for existing-file edits when nearby evidence is missing
+- remind the agent to validate after mutation instead of silently stacking changes
 - track whether the session is in **Observe**, **Execute**, or **Review**
 - flag and handle high-risk command patterns
 - reduce context pollution with large-output summarization
@@ -36,13 +37,13 @@ For Hermes, that means a runtime plugin that can:
 
 ## Current status
 
-- Version: `v0.0.5`
+- Version: `v0.0.6`
 - Host: **Hermes Agent plugin hooks**
 - Language: **Python**
 
-> Version note: the GitHub release/tag line is `v0.0.5`, while the Python package and wheel version is `0.0.5` to follow PEP 440. They refer to the same release.
+> Version note: the GitHub release/tag line is `v0.0.6`, while the Python package and wheel version is `0.0.6` to follow PEP 440. They refer to the same release.
 
-The current main branch is the cooperative-runtime `v0.0.5` line: explicit forced modes, classifier fallback/mode mapping, mode-transition audit, forward-progress reopen signaling, and phantom-target recovery hardening are now part of the release baseline.
+The current main branch is the `v0.0.6` line: default workflow risks are recorded as compact runtime guidance, while `enforcement_mode: strict` preserves the older hard-block/cooperative-mode behavior for operators that want it.
 
 ## Quick start
 
@@ -64,14 +65,14 @@ If the target instance already has other plugins, append `proofrail` to the exis
 
 ## What it does at runtime
 
-- **evidence before mutation** — inspect first, then edit
+- **non-blocking workflow guidance** — missing evidence, pending verification, broad evidence, and repeated low-signal probes create actionable guidance by default instead of stopping the tool call
 - **verify after mutation** — validate changes before continuing
-- **cooperative forced modes** — enter explicit `gather_target_evidence`, `validate_only`, `change_strategy`, or `user_choice` submodes with allowed / forbidden next actions
+- **strict compatibility mode** — `enforcement_mode: strict` preserves the older hard-block cooperative modes for deployments that need stricter enforcement
 - **mode-specific task handoffs** — inject collaboration-framed task panels so the next legal move feels like progress instead of punishment
-- **low-signal probe blocking** — stop repeated no-progress probing loops
+- **low-signal probe advisories** — warn on repeated no-progress probing loops by default; strict mode can still block them
 - **gray-area classifier fallback + mode mapping** — when structured output is unsupported, fall back to rule-based classification; when the classifier does intervene, map it into cooperative runtime modes
 - **dangerous command audit** — detect high-risk commands and surface them back into reasoning context
-- **large output summarization** — compress oversized tool output before reinjection
+- **large output summarization** — compress oversized tool output before reinjection while preserving diagnostic lines from omitted middle sections
 - **session-scoped workflow state** — maintain Observe / Execute / Review phase per session
 - **audit trail** — JSONL audit events for preflight, mutation, validation, forced-mode transitions, forward-progress reopen events, dangerous commands, and summarization
 - **task ledger** — session-level record of evidence, mutations, validation, touched files, and final state
@@ -79,21 +80,19 @@ If the target instance already has other plugins, append `proofrail` to the exis
 
 ## Current runtime rules
 
-1. **Existing files cannot be modified without evidence**
-2. **After a mutation, the next mutation must wait until validation runs**
-3. **After repeated low-signal probes, the same no-progress loop is blocked**
-4. **Dangerous terminal commands default to `warn/audit`, not a manual approval loop**
-   - `approve` is currently **fail-closed** in Hermes: it blocks and tells the operator to confirm manually, then retry.
-5. **Large tool output is summarized through `transform_tool_result`**
-6. **`pre_llm_call` injects phase-aware runtime context**
-7. **After changes, the plugin injects touched files, validation hints, and final evidence-report requirements**
-8. **Hard workflow blocks enter cooperative modes, not just warning prose**
-9. **Classifier interventions can route the runtime into `change_strategy` or `user_choice` instead of leaving the model to guess the shortest legal next step**
-10. **Successful validation explicitly reopens forward progress and emits a semantic audit event**
+1. **Default `enforcement_mode` is `advisory`**: workflow risks are recorded and injected as compact next-action cards, but normal tool calls continue.
+2. **Strict compatibility is explicit**: set `enforcement_mode: strict` to restore the older hard-block cooperative modes for missing evidence, pending verification, broad evidence, and repeated low-signal probes.
+3. **Dangerous terminal commands are policy-driven**: `warn` creates advisory + audit + allow, `allow` audits + allows, `block` blocks, and `approve` fail-closes in Hermes until a real approval route exists.
+4. **Validation policy defaults to `batch`** with `mutation_batch_max: 5`; `after_each_mutation` and `off` are also supported.
+5. **Large tool output is summarized through `transform_tool_result`** while retaining actionable diagnostics from omitted middle sections.
+6. **`pre_llm_call` injects phase-aware runtime context or compact advisory cards**.
+7. **After changes, the plugin injects touched files, validation hints, and final evidence-report requirements**.
+8. **Classifier interventions can still route the runtime into `change_strategy` or `user_choice` instead of leaving the model to guess the shortest valid next step**.
+9. **Successful validation explicitly reopens forward progress and emits a semantic audit event**.
 
 ## Configuration
 
-The default configuration is usable as-is and optimized for autonomous execution: dangerous commands default to `warn`, meaning they stay in autonomous mode with audit + follow-up verification expectations, but they are still subject to the same evidence-before-mutation and verify-after-mutation guardrails as any other mutating command.
+The default configuration is usable as-is and optimized for autonomous execution: `enforcement_mode` defaults to `advisory`, so workflow risks become compact next-action advisories rather than hard blockers. Dangerous commands default to `warn`, meaning they stay in autonomous mode with audit + follow-up verification expectations unless you choose `block`/`approve`.
 
 If your Hermes build exposes `plugins.entries`, you can override settings like this:
 
@@ -103,6 +102,10 @@ plugins:
     - proofrail
   entries:
     proofrail:
+      enforcement_mode: advisory
+      advisory_injection: compact
+      validation_policy: batch
+      mutation_batch_max: 5
       dangerous_command_action: warn
       summary_threshold_chars: 8000
       low_signal_block_threshold: 2
@@ -134,11 +137,12 @@ Core regression coverage currently includes:
 
 - hook registration
 - dangerous command detection in warn/audit mode
-- evidence-before-mutation blocking for existing files
+- default non-blocking guidance behavior for missing evidence, pending verification, dangerous-command warn mode, compact advisory injection, and diagnostic-preserving summaries
+- strict compatibility blocking for existing files
 - new-file creation allowance
 - conservative `patch` mutation handling
-- verification-before-next-mutation enforcement
-- low-signal probe blocking
+- verification-before-next-mutation advisory/default behavior plus strict enforcement compatibility
+- low-signal probe advisory/default behavior plus strict blocking compatibility
 - large-output summarization
 - phase-aware `pre_llm_call` injection
 - explicit system-added / non-user provenance markers for injected plugin context
@@ -165,6 +169,7 @@ Run the local verification lane with:
 
 ```bash
 pytest -q \
+  tests/test_advisory_runtime.py \
   tests/test_proofrail.py \
   tests/test_readback_validation_regression.py \
   tests/test_cooperative_modes.py \

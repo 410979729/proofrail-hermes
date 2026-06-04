@@ -58,9 +58,9 @@ Every rule should start with a failing test before implementation.
 
 Current test coverage includes:
 
-- existing-file mutation blocked without evidence
-- mutation requires verification before the next mutation
-- repeated low-signal probe blocking
+- existing-file mutation records an advisory without evidence by default, and blocks only in `strict` mode
+- mutation records pending-verification advisories before the next mutation by default, and blocks only in `strict` mode
+- repeated low-signal probes record advisories by default, and block only in `strict` mode
 - tool-result summarization
 - stage-aware `pre_llm_call` context
 - session end/finalize cleanup
@@ -106,7 +106,7 @@ Each session stores:
 
 ### pre_tool_call
 
-Returns:
+Returns either `None` to allow the call or, in strict / dangerous-command block paths:
 
 ```python
 {"action": "block", "message": "..."}
@@ -114,10 +114,9 @@ Returns:
 
 Responsibilities:
 
-- dangerous-command gating
-- block existing-file mutation without evidence
-- block further mutation before validation
-- block repeated low-signal probing with the same intent
+- dangerous-command policy (`warn`, `allow`, `block`, `approve`)
+- non-blocking workflow-risk recording for missing evidence / pending verification / broad evidence / low-signal repeats
+- strict compatibility hard blocks for operators that explicitly choose strict mode
 
 ### post_tool_call
 
@@ -142,28 +141,31 @@ Responsibilities:
 - inject phase summaries and runtime reminders
 - append context rather than rewriting the system prompt
 
-## Current v0.0.5 cooperative runtime release line
+## Current v0.0.6 release line
 
-The public `v0.0.5` / `0.0.5` release line includes:
+The public `v0.0.6` / `0.0.6` release line includes:
 
-1. default `dangerous_command_action=warn`; high-risk commands stay out of a manual approval loop, but they are audited and paired with self-verification reminders
-2. a JSONL audit trail for session lifecycle, tool preflight, dangerous commands, tool results, and large-output summarization
-3. a validation-suggestion layer that proposes narrow follow-up checks from touched files and command shape
-4. session state for mutation / validation / dangerous-command counts, touched files, validation suggestions, recent labels, and task-ledger state
-5. `pre_llm_call` injection of touched files, suggested validations, dangerous-command audit reminders, and final evidence-report requirements
-6. explicit forced modes: `gather_target_evidence`, `validate_only`, `change_strategy`, and `user_choice`
-7. task-panel handoff framing with allowed / forbidden next actions and mode-specific collaboration wording
-8. classifier fallback from unsupported structured output into `RuleBasedGrayAreaClassifier`
-9. classifier-to-mode mapping so gray-area decisions become concrete runtime submodes
-10. `forced_mode_transition` audit events from classifier, block, and tool-observation sources
-11. `forward_progress_reopened` semantics when validation clears `validate_only`
-12. phantom-target recovery hardening for shell assignment tokens, suppression redirects, directory-level targets, and handoff wording compatibility
-13. behavior-simulation and self-smoke coverage for the cooperative path
+1. default `enforcement_mode=advisory`; workflow risks are recorded as advisories and compact next-action cards instead of blocking tool calls
+2. explicit `enforcement_mode=strict` compatibility for the older hard-block cooperative modes
+3. default `dangerous_command_action=warn`; high-risk commands stay out of a manual approval loop, but they are audited and paired with self-verification reminders
+4. a JSONL audit trail for session lifecycle, tool preflight, dangerous commands, tool results, advisories, and large-output summarization
+5. a validation-suggestion layer that proposes narrow follow-up checks from touched files and command shape
+6. session state for mutation / validation / dangerous-command counts, touched files, validation suggestions, advisories, recent labels, and task-ledger state
+7. `pre_llm_call` injection of touched files, suggested validations, dangerous-command audit reminders, compact advisory cards, and final evidence-report requirements
+8. explicit forced modes: `gather_target_evidence`, `validate_only`, `change_strategy`, and `user_choice` for strict/classifier paths
+9. task-panel handoff framing with allowed / forbidden next actions and mode-specific collaboration wording
+10. classifier fallback from unsupported structured output into `RuleBasedGrayAreaClassifier`
+11. classifier-to-mode mapping so gray-area decisions become concrete runtime submodes
+12. `forced_mode_transition` audit events from classifier, strict block, and tool-observation sources
+13. `forward_progress_reopened` semantics when validation clears `validate_only`
+14. diagnostic-preserving large-output summaries that keep `FAILED`, `ERROR`, traceback, and assertion lines from omitted middle sections
+15. phantom-target recovery hardening for shell assignment tokens, suppression redirects, directory-level targets, and handoff wording compatibility
+16. behavior-simulation, advisory-runtime, and self-smoke coverage for the runtime path
 
 ## Version semantics
 
-- GitHub release/tag line: `v0.0.5`
-- Python package version: `0.0.5`
+- GitHub release/tag line: `v0.0.6`
+- Python package version: `0.0.6`
 
 This split is intentional: GitHub tags keep the leading `v`, while Python packaging follows PEP 440.
 

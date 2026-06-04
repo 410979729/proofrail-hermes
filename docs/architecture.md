@@ -15,7 +15,7 @@ Proofrail is a **Hermes-native Python autonomous coding harness**. It implements
 
 - Reads plugin config from common Hermes config shapes.
 - Coerces and clamps values.
-- Supports `dangerous_command_action`, `summary_threshold_chars`, `low_signal_block_threshold`, `audit_enabled`, `audit_log_path`, `llm_classifier_enabled`, `llm_classifier_provider`, `llm_classifier_model`, and `tool_aliases`.
+- Supports `enforcement_mode`, `advisory_injection`, `validation_policy`, `mutation_batch_max`, `dangerous_command_action`, `summary_threshold_chars`, `low_signal_block_threshold`, `audit_enabled`, `audit_log_path`, `llm_classifier_enabled`, `llm_classifier_provider`, `llm_classifier_model`, and `tool_aliases`.
 
 ### 3. `session_state.py` — workflow state machine
 

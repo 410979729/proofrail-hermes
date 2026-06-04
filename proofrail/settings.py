@@ -6,7 +6,11 @@ from collections.abc import Mapping
 from typing import Any
 
 from .constants import (
+    DEFAULT_ADVISORY_INJECTION,
     DEFAULT_DANGEROUS_COMMAND_ACTION,
+    DEFAULT_ENFORCEMENT_MODE,
+    DEFAULT_MUTATION_BATCH_MAX,
+    DEFAULT_VALIDATION_POLICY,
     LOW_SIGNAL_BLOCK_THRESHOLD,
     MAX_SUMMARY_THRESHOLD_CHARS,
     MIN_SUMMARY_THRESHOLD_CHARS,
@@ -56,9 +60,23 @@ def _coerce_optional_str(value: Any) -> str | None:
     return None
 
 
+def _coerce_choice(value: Any, *, default: str, allowed: set[str]) -> str:
+    choice = str(value or default).strip().lower()
+    return choice if choice in allowed else default
+
+
 def _coerce_action(value: Any) -> str:
     action = str(value or DEFAULT_DANGEROUS_COMMAND_ACTION).strip().lower()
     return action if action in {"approve", "block", "warn", "allow"} else DEFAULT_DANGEROUS_COMMAND_ACTION
+
+
+def _coerce_validation_policy(value: Any) -> str:
+    choice = str(value or DEFAULT_VALIDATION_POLICY).strip().lower()
+    if choice == "immediate":
+        return "after_each_mutation"
+    if choice in {"batch", "after_each_mutation", "off"}:
+        return choice
+    return DEFAULT_VALIDATION_POLICY
 
 
 def _coerce_tool_aliases(value: Any) -> dict[str, ToolCategoryName]:
@@ -144,6 +162,23 @@ def read_plugin_config(ctx: Any) -> Mapping[str, Any]:
 def settings_from_mapping(config: Mapping[str, Any] | None) -> PluginSettings:
     raw = _as_mapping(config)
     return PluginSettings(
+        enforcement_mode=_coerce_choice(
+            raw.get("enforcement_mode"),
+            default=DEFAULT_ENFORCEMENT_MODE,
+            allowed={"off", "advisory", "strict", "guarded"},
+        ),  # type: ignore[arg-type]
+        advisory_injection=_coerce_choice(
+            raw.get("advisory_injection"),
+            default=DEFAULT_ADVISORY_INJECTION,
+            allowed={"compact", "full", "off"},
+        ),  # type: ignore[arg-type]
+        validation_policy=_coerce_validation_policy(raw.get("validation_policy")),  # type: ignore[arg-type]
+        mutation_batch_max=_coerce_int(
+            raw.get("mutation_batch_max"),
+            default=DEFAULT_MUTATION_BATCH_MAX,
+            minimum=1,
+            maximum=20,
+        ),
         dangerous_command_action=_coerce_action(raw.get("dangerous_command_action")),  # type: ignore[arg-type]
         summary_threshold_chars=_coerce_int(
             raw.get("summary_threshold_chars"),

@@ -10,8 +10,12 @@ from __future__ import annotations
 import re
 
 PLUGIN_NAME = "proofrail"
-PLUGIN_VERSION = "v0.0.5"
+PLUGIN_VERSION = "v0.0.6"
 
+DEFAULT_ENFORCEMENT_MODE = "advisory"
+DEFAULT_ADVISORY_INJECTION = "compact"
+DEFAULT_VALIDATION_POLICY = "batch"
+DEFAULT_MUTATION_BATCH_MAX = 5
 DEFAULT_DANGEROUS_COMMAND_ACTION = "warn"
 MIN_SUMMARY_THRESHOLD_CHARS = 1000
 MAX_SUMMARY_THRESHOLD_CHARS = 50000
@@ -32,6 +36,7 @@ DEFAULT_TOOL_ALIASES: dict[str, str] = {
     "vision_analyze": "read",
     "write_file": "write",
     "patch": "write",
+    "apply_patch": "write",
     "search_files": "search",
     "web_search": "search",
     "browser_navigate": "network",
