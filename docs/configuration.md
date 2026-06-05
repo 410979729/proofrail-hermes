@@ -39,7 +39,7 @@ Allowed values:
 
 - `advisory` — default. Workflow risks are recorded, audited, and injected as compact next-action guidance; the tool call continues.
 - `strict` — preserve the older hard-block/cooperative-mode behavior for missing evidence, pending verification, broad evidence, and repeated low-signal probes.
-- `guarded` — reserved compatibility label; currently behaves like advisory for workflow risks while command policy remains active.
+- `guarded` — workflow risks behave like advisory, but critical dangerous commands hard-block unless `dangerous_command_action: allow` is set. `block` and `approve` remain fail-closed.
 - `off` — disable workflow-risk advisories/blocks while leaving other plugin plumbing available.
 
 ### `advisory_injection`
@@ -47,16 +47,16 @@ Allowed values:
 Allowed values:
 
 - `compact` — default. Inject a short advisory action card when there is an open advisory.
-- `full` — keep the broader runtime context/task panel style.
-- `off` — do not inject advisory cards; state and audit still update.
+- `full` — render the broader runtime context/task panel style when there is an open advisory or other risk state.
+- `off` — do not inject advisory cards. The compact base `SYSTEM STATUS` context can still be injected; state and audit still update.
 
 ### `validation_policy`
 
 Allowed values:
 
-- `batch` — default. Track unverified mutations and escalate advisory severity as the batch grows.
-- `after_each_mutation` — compatibility spelling for immediate validation expectations; old `immediate` config values are mapped here.
-- `off` — do not track pending-verification state and do not create pending-verification workflow advisories/blocks. Mutation counts and audit/final-report state still update.
+- `batch` — default. Track unverified mutations and escalate advisory severity as the batch grows. In strict mode, mutation continues until `mutation_batch_max` is reached, then validation is required before more mutation.
+- `after_each_mutation` — compatibility spelling for immediate validation expectations; old `immediate` config values are mapped here. In strict mode, the next mutation is blocked until validation completes.
+- `off` — do not create pending-verification workflow advisories/blocks.
 
 ### `mutation_batch_max`
 
@@ -66,7 +66,7 @@ Maximum unverified mutation batch size before advisory severity escalates. Defau
 
 Allowed values:
 
-- `warn` — default. Dangerous commands are allowed, written to the audit log, and reflected back into the next `pre_llm_call` context so the agent must verify and report risk.
+- `warn` — default. Dangerous commands are allowed, written to the audit log, and reflected back into the next `pre_llm_call` context so the agent must verify and report risk. In `guarded` mode, critical dangerous commands hard-block under `warn`.
 - `allow` — dangerous commands are allowed and audited, without warning text being treated as a policy event.
 - `block` — dangerous commands return `{"action": "block"}`.
 - `approve` — **not auto-allow**. This is a fail-closed/manual-confirmation label for hosts that want explicit human gating semantics. In the current Hermes implementation it still returns a blocking decision and tells the operator to confirm manually, then retry the command.
@@ -81,7 +81,7 @@ The value is clamped between 1000 and 50000.
 
 ### `low_signal_block_threshold`
 
-How many repeated low-signal observations with the same intent are allowed before Proofrail raises a repeated-probe workflow risk. Default mode records guidance; `strict` mode blocks the repeated probe.
+How many repeated low-signal observations with the same intent are allowed before blocking repeated probes.
 
 The value is clamped between 1 and 20.
 

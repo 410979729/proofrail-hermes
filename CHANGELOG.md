@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Nothing yet.
+- Complete advisory-first cleanup for classifier `block` / `ask_user`, stale `validate_only` forced modes, guarded critical dangerous commands, advisory ignored audit events, validation-policy batch semantics, advisory injection modes, default tool aliases, and unknown-target mutating exec advisories.
 
 ## v0.0.6 - 2026-06-04
 
@@ -11,8 +11,6 @@
 - Add advisory configuration controls: `enforcement_mode`, `advisory_injection`, `validation_policy`, and `mutation_batch_max`; map legacy `immediate` validation policy to `after_each_mutation` and clamp mutation batches to 1–20.
 - Record structured advisory state and audit events with severity, target, fastest next action, allowed next actions, risk-if-ignored, source/tool/command metadata, and whether strict mode would have blocked.
 - Change dangerous-command `warn` semantics to advisory + audit + allow, while keeping `block` hard-blocking and `approve` fail-closed until Hermes exposes a real approval route.
-- Keep recent dangerous-command warnings visible in compact context even when a follow-up workflow advisory is also recorded.
-- Make `validation_policy="off"` stop tracking pending-verification state while still recording mutations, audit metadata, and final-report state.
 - Add compact advisory prompt injection and expose advisory/batch state through `explain_state()` for runtime diagnostics.
 - Preserve diagnostic lines from omitted middle sections when summarizing large outputs, including failures, errors, tracebacks, exceptions, and assertion lines.
 - Ignore inline Python source passed through `python -c` when extracting validation targets, while still preserving real Python script paths.

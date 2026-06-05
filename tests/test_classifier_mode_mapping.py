@@ -6,6 +6,7 @@ import pytest
 
 from proofrail import build_runtime_hooks
 from proofrail.classifier import GuardrailClassifierDecision
+from proofrail.models import PluginSettings
 from proofrail.session_state import STATE_STORE
 
 
@@ -16,6 +17,8 @@ def _clear_modes() -> None:
     STATE_STORE.clear("classifier-target-state")
     STATE_STORE.clear("classifier-narrow-validation")
     STATE_STORE.clear("classifier-user-choice-approval")
+    STATE_STORE.clear("classifier-block-advisory")
+    STATE_STORE.clear("classifier-ask-user-advisory")
 
 
 def test_classifier_warn_strategy_shift_sets_change_strategy_mode(tmp_path: Path) -> None:
@@ -56,7 +59,48 @@ def test_classifier_warn_strategy_shift_sets_change_strategy_mode(tmp_path: Path
     assert "switch to a different target-local probe shape" in context
 
 
-def test_classifier_block_target_state_sets_gather_target_evidence_mode_and_blocks_mutation(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("decision_name", "evidence_gap", "session_id"),
+    [
+        ("block", "target_state", "classifier-block-advisory"),
+        ("ask_user", "user_choice", "classifier-ask-user-advisory"),
+    ],
+)
+def test_classifier_block_and_ask_user_are_advisory_by_default(
+    tmp_path: Path,
+    decision_name: str,
+    evidence_gap: str,
+    session_id: str,
+) -> None:
+    target = tmp_path / "module.py"
+    target.write_text("print('old')\n")
+
+    def fake_classifier(**_kwargs):
+        return GuardrailClassifierDecision(
+            decision=decision_name,  # type: ignore[arg-type]
+            reason="Classifier found a gray-area workflow risk.",
+            evidence_gap=evidence_gap,  # type: ignore[arg-type]
+            guidance=("inspect module.py directly",),
+            source="test",
+        )
+
+    hooks = build_runtime_hooks(root_dir=str(tmp_path), classifier=fake_classifier)
+    hooks.post_tool_call("read_file", {"path": "module.py"}, "print('old')\n", session_id=session_id)
+
+    decision = hooks.pre_tool_call(
+        "write_file",
+        {"path": "module.py", "content": "print('new')\n"},
+        session_id=session_id,
+    )
+
+    assert decision is None
+    state = hooks.explain_state(session_id)
+    assert state["last_advisory"]["reason"] == "classifier"
+    assert state["last_advisory"]["would_have_blocked_in_strict"] is True
+    assert state["last_advisory"]["evidence_gap"] == evidence_gap
+
+
+def test_classifier_block_target_state_sets_gather_target_evidence_mode_and_blocks_mutation_in_strict(tmp_path: Path) -> None:
     target = tmp_path / "module.py"
     target.write_text("print('old')\n")
 
@@ -72,7 +116,11 @@ def test_classifier_block_target_state_sets_gather_target_evidence_mode_and_bloc
             source="test",
         )
 
-    hooks = build_runtime_hooks(root_dir=str(tmp_path), classifier=fake_classifier)
+    hooks = build_runtime_hooks(
+        settings=PluginSettings(enforcement_mode="strict"),
+        root_dir=str(tmp_path),
+        classifier=fake_classifier,
+    )
     session_id = "classifier-target-state"
     hooks.post_tool_call("read_file", {"path": "module.py"}, "print('old')\n", session_id=session_id)
     hooks.post_tool_call("search_files", {"pattern": "module", "path": str(tmp_path)}, "module.py", session_id=session_id)
@@ -99,7 +147,7 @@ def test_classifier_block_target_state_sets_gather_target_evidence_mode_and_bloc
     assert "current subgoal: inspect the real target before mutating it" in context
 
 
-def test_classifier_block_narrow_validation_sets_validate_only_mode_and_blocks_mutation(tmp_path: Path) -> None:
+def test_classifier_block_narrow_validation_sets_validate_only_mode_and_blocks_mutation_in_strict(tmp_path: Path) -> None:
     target = tmp_path / "module.py"
     target.write_text("print('old')\n")
 
@@ -115,7 +163,11 @@ def test_classifier_block_narrow_validation_sets_validate_only_mode_and_blocks_m
             source="test",
         )
 
-    hooks = build_runtime_hooks(root_dir=str(tmp_path), classifier=fake_classifier)
+    hooks = build_runtime_hooks(
+        settings=PluginSettings(enforcement_mode="strict"),
+        root_dir=str(tmp_path),
+        classifier=fake_classifier,
+    )
     session_id = "classifier-narrow-validation"
     hooks.post_tool_call("read_file", {"path": "module.py"}, "print('old')\n", session_id=session_id)
 
@@ -141,7 +193,7 @@ def test_classifier_block_narrow_validation_sets_validate_only_mode_and_blocks_m
     assert "current subgoal: verify the last change on module.py" in context
 
 
-def test_classifier_ask_user_sets_user_choice_mode_and_blocks_mutation(tmp_path: Path) -> None:
+def test_classifier_ask_user_sets_user_choice_mode_and_blocks_mutation_in_strict(tmp_path: Path) -> None:
     target = tmp_path / "config.json"
     target.write_text('{"mode": "old"}\n')
     observed = 'mode=old\n'
@@ -158,7 +210,11 @@ def test_classifier_ask_user_sets_user_choice_mode_and_blocks_mutation(tmp_path:
             source="test",
         )
 
-    hooks = build_runtime_hooks(root_dir=str(tmp_path), classifier=fake_classifier)
+    hooks = build_runtime_hooks(
+        settings=PluginSettings(enforcement_mode="strict"),
+        root_dir=str(tmp_path),
+        classifier=fake_classifier,
+    )
     session_id = "classifier-user-choice"
     hooks.post_tool_call("read_file", {"path": "config.json"}, observed, session_id=session_id)
     hooks.post_tool_call("read_file", {"path": "config.json"}, observed, session_id=session_id)
@@ -202,7 +258,11 @@ def test_clarify_response_only_allows_matching_mutation_and_consumes_once(tmp_pa
             source="test",
         )
 
-    hooks = build_runtime_hooks(root_dir=str(tmp_path), classifier=fake_classifier)
+    hooks = build_runtime_hooks(
+        settings=PluginSettings(enforcement_mode="strict"),
+        root_dir=str(tmp_path),
+        classifier=fake_classifier,
+    )
     session_id = "classifier-user-choice-approval"
     hooks.post_tool_call("read_file", {"path": "notes.txt"}, "publish target: origin/main\n", session_id=session_id)
 

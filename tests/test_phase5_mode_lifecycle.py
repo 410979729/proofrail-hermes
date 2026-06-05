@@ -12,7 +12,11 @@ from proofrail.session_state import STATE_STORE
 
 
 def build_runtime_hooks(*args, settings: PluginSettings | None = None, **kwargs):
-    strict_settings = PluginSettings(enforcement_mode="strict") if settings is None else replace(settings, enforcement_mode="strict")
+    strict_settings = (
+        PluginSettings(enforcement_mode="strict", validation_policy="after_each_mutation")
+        if settings is None
+        else replace(settings, enforcement_mode="strict", validation_policy="after_each_mutation")
+    )
     return _build_runtime_hooks(*args, settings=strict_settings, **kwargs)
 
 

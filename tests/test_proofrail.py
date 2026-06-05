@@ -20,7 +20,11 @@ def build_runtime_hooks(*args, settings: PluginSettings | None = None, **kwargs)
     Non-blocking default behavior is covered in test_advisory_runtime.py.
     """
 
-    strict_settings = PluginSettings(enforcement_mode="strict") if settings is None else replace(settings, enforcement_mode="strict")
+    strict_settings = (
+        PluginSettings(enforcement_mode="strict", validation_policy="after_each_mutation")
+        if settings is None
+        else replace(settings, enforcement_mode="strict", validation_policy="after_each_mutation")
+    )
     return _build_runtime_hooks(*args, settings=strict_settings, **kwargs)
 
 

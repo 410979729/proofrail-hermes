@@ -183,7 +183,6 @@ def record_tool_observation(
     touched_paths: list[str] | tuple[str, ...] | None = None,
     validation_suggestions: list[str] | tuple[str, ...] | None = None,
     enforce_forced_modes: bool = True,
-    track_verification: bool = True,
 ) -> SessionRuntimeState:
     def apply(state: SessionRuntimeState) -> None:
         category = get_tool_category(tool_name, tool_aliases)
@@ -227,42 +226,34 @@ def record_tool_observation(
                 clear_forced_next_mode_unlocked(state)
 
         if mutation_succeeded:
+            state.pending_verification = True
             state.last_mutation_label = describe_mutation(tool_name, args, tool_aliases)
             state.mutation_count += 1
+            state.unverified_mutation_count += 1
+            if state.mutation_batch_id is None:
+                state.mutation_batch_id = f"batch-{int(time.time() * 1000)}"
             state.final_report_required = True
             state.mutation_labels = _merge_tuple(state.mutation_labels, [state.last_mutation_label])
+            state.phase = "review"
             state.touched_files = _merge_tuple(state.touched_files, summarize_paths(touched_paths or []))
-            if track_verification:
-                state.pending_verification = True
-                state.unverified_mutation_count += 1
-                if state.mutation_batch_id is None:
-                    state.mutation_batch_id = f"batch-{int(time.time() * 1000)}"
-                state.phase = "review"
-                state.validation_suggestions = _merge_tuple(state.validation_suggestions, validation_suggestions or [])
-                target = summarize_paths(touched_paths or [])
-                target_label = target[0] if target else compact_label(state.last_mutation_label or "recent mutation", 120)
-                if enforce_forced_modes:
-                    state.forced_next_mode = "validate_only"
-                    state.forced_next_target = target_label
-                    state.forced_next_why = "Once this is verified, forward progress can continue safely."
-                    state.forced_next_exit_condition = f"Confirm the last change on {target_label} landed as intended."
-                    state.allowed_next_actions = (
-                        f"read back {target_label} directly",
-                        f"run one narrow validation against {target_label}",
-                    )
-                    state.forbidden_next_actions = (
-                        "further mutation",
-                        "alternate tools for the same mutation",
-                        "broad search or replanning",
-                    )
-                else:
-                    clear_forced_next_mode_unlocked(state)
+            state.validation_suggestions = _merge_tuple(state.validation_suggestions, validation_suggestions or [])
+            target = summarize_paths(touched_paths or [])
+            target_label = target[0] if target else compact_label(state.last_mutation_label or "recent mutation", 120)
+            if enforce_forced_modes:
+                state.forced_next_mode = "validate_only"
+                state.forced_next_target = target_label
+                state.forced_next_why = "Once this is verified, forward progress can continue safely."
+                state.forced_next_exit_condition = f"Confirm the last change on {target_label} landed as intended."
+                state.allowed_next_actions = (
+                    f"read back {target_label} directly",
+                    f"run one narrow validation against {target_label}",
+                )
+                state.forbidden_next_actions = (
+                    "further mutation",
+                    "alternate tools for the same mutation",
+                    "broad search or replanning",
+                )
             else:
-                state.pending_verification = False
-                state.unverified_mutation_count = 0
-                state.mutation_batch_id = None
-                state.validation_suggestions = ()
-                state.phase = "execute" if state.evidence_count > 0 else "observe"
                 clear_forced_next_mode_unlocked(state)
         elif state.pending_verification and validation_succeeded:
             state.pending_verification = False
@@ -300,6 +291,24 @@ def record_advisory(session_id: str, advisory: ProofrailAdvisory) -> SessionRunt
         state.last_advisory = advisory
         state.last_advisory_reason = advisory.reason
         state.advisories = _append_advisory(state.advisories, advisory)
+
+    return STATE_STORE.update(session_id, apply)
+
+
+def record_advisory_ignored(session_id: str, *, reason: str | None = None) -> SessionRuntimeState:
+    def apply(state: SessionRuntimeState) -> None:
+        advisory = state.last_advisory
+        if advisory is None or advisory.ignored:
+            return
+        if reason is not None and advisory.reason != reason:
+            return
+        ignored = replace(advisory, ignored=True)
+        state.ignored_advisory_count += 1
+        state.last_advisory = ignored
+        state.advisories = tuple(
+            ignored if item.created_at == advisory.created_at and item.reason == advisory.reason else item
+            for item in state.advisories
+        )
 
     return STATE_STORE.update(session_id, apply)
 

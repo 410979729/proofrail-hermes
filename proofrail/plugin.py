@@ -32,7 +32,9 @@ from .session_state import (
     STATE_STORE,
     build_tool_intent_signature,
     clear_classifier_decision,
+    is_low_signal_observation,
     record_advisory,
+    record_advisory_ignored,
     record_block_decision,
     record_classifier_decision,
     record_dangerous_command,
@@ -244,23 +246,6 @@ def _has_risk(state, low_signal_threshold: int) -> bool:
     return False
 
 
-def _recent_unique_advisories(state, *, limit: int = 3):
-    """Return recent distinct advisories, newest first."""
-    seen: set[str] = set()
-    out = []
-    for advisory in reversed(state.advisories):
-        key = advisory.reason
-        if key in seen:
-            continue
-        out.append(advisory)
-        seen.add(key)
-        if len(out) >= limit:
-            break
-    if not out and state.last_advisory is not None:
-        out.append(state.last_advisory)
-    return out
-
-
 def _has_target_local_evidence(state, target_hints: list[str] | tuple[str, ...], root_dir: str | None) -> bool:
     if not target_hints:
         return state.evidence_count > 0
@@ -269,26 +254,21 @@ def _has_target_local_evidence(state, target_hints: list[str] | tuple[str, ...],
 
 def _render_compact_advisory_context(state) -> str:
     base = _compact_context(state)
-    advisories = _recent_unique_advisories(state)
-    if not advisories:
+    advisory = state.last_advisory
+    if advisory is None:
         return base
-    primary = advisories[0]
     lines = [
         base,
         "",
         "## [PROOFRAIL ADVISORY — not user input]",
-        f"- Proofrail advisory [{primary.reason}]: {primary.message}",
+        f"- Proofrail advisory [{advisory.reason}]: {advisory.message}",
     ]
-    if primary.target:
-        lines.append(f"- target: {primary.target}")
-    if primary.mode != "none":
-        lines.append(f"- mode hint: {primary.mode}")
-    if primary.fastest_next_action:
-        lines.append(f"- fastest next action: {primary.fastest_next_action}")
-    for related in advisories[1:]:
-        lines.append(f"- related advisory [{related.reason}]: {related.message}")
-        if related.fastest_next_action:
-            lines.append(f"  fastest next action: {related.fastest_next_action}")
+    if advisory.target:
+        lines.append(f"- target: {advisory.target}")
+    if advisory.mode != "none":
+        lines.append(f"- mode hint: {advisory.mode}")
+    if advisory.fastest_next_action:
+        lines.append(f"- fastest next action: {advisory.fastest_next_action}")
     lines.append("- Advisory mode does not block this tool call; use the fastest next action to reduce risk.")
     return "\n".join(lines)
 
@@ -414,9 +394,30 @@ def _render_task_panel(state) -> str:
         f"current subgoal: {subgoal}",
         f"why this matters: {state.forced_next_why or 'This is the fastest safe way to regain forward progress.'}",
         f"success / exit condition: {state.forced_next_exit_condition or 'satisfy the current Proofrail subgoal directly'}",
+    ]
+    if state.last_advisory and not state.last_block_message:
+        advisory = state.last_advisory
+        lines.extend(
+            [
+                "",
+                "## [PROOFRAIL ADVISORY — not user input]",
+                f"- Proofrail advisory [{advisory.reason}]: {advisory.message}",
+            ]
+        )
+        if advisory.target:
+            lines.append(f"- target: {advisory.target}")
+        if advisory.mode != "none":
+            lines.append(f"- mode hint: {advisory.mode}")
+        if advisory.fastest_next_action:
+            lines.append(f"- fastest next action: {advisory.fastest_next_action}")
+        if advisory.allowed_next_actions:
+            lines.append("- allowed next actions:")
+            lines.extend(f"  - {item}" for item in advisory.allowed_next_actions)
+        lines.append(f"- risk if ignored: {advisory.risk_if_ignored}")
+    lines.extend([
         "",
         "smallest next action:",
-    ]
+    ])
     allowed = list(state.allowed_next_actions) or ["perform the narrowest action that satisfies the current subgoal"]
     lines.extend(f"- {item}" for item in allowed)
     lines.append("")
@@ -453,14 +454,6 @@ def _render_task_panel(state) -> str:
             f"- Phase: {state.phase} | task: {status}",
         ]
     )
-
-    advisories = _recent_unique_advisories(state)
-    if advisories:
-        lines.extend(["", "## [SYSTEM STATUS — active advisories]"])
-        for advisory in advisories:
-            lines.append(f"- [{advisory.reason}] {advisory.message}")
-            if advisory.fastest_next_action:
-                lines.append(f"  fastest next action: {advisory.fastest_next_action}")
 
     if state.phase == "observe":
         lines.append("- Do not start by reading plugin internals or full audit history.")
@@ -801,7 +794,7 @@ class RuntimeHooks:
             "last_classifier_source": state.last_classifier_source,
             "pending_user_choice_signature": state.pending_user_choice_signature,
             "approved_mutation_signature": state.approved_mutation_signature,
-            "enforcement_mode": self.settings.enforcement_mode,
+            "enforcement_mode": state.enforcement_mode,
             "advisories": [asdict(item) for item in state.advisories],
             "last_advisory": asdict(state.last_advisory) if state.last_advisory else None,
             "advisory_count": state.advisory_count,
@@ -941,6 +934,14 @@ class RuntimeHooks:
                     reason="dangerous_command_approve",
                 )
             if self.settings.dangerous_command_action == "warn":
+                if self.settings.enforcement_mode == "guarded":
+                    return self._blocked(
+                        session_id,
+                        tool_name,
+                        payload,
+                        f"Critical dangerous command blocked in guarded mode: {label}",
+                        reason="guarded_critical_dangerous_command",
+                    )
                 if advisory_enabled:
                     self._advisory(
                         session_id,
@@ -1002,7 +1003,26 @@ class RuntimeHooks:
         if state.pending_verification and is_mutation and self.settings.validation_policy != "off":
             pending_target = compact_label((state.touched_files[0] if state.touched_files else target_label) or state.last_mutation_label or "recent mutation", 120)
             fastest = f"validate {pending_target} with the narrowest check"
-            if strict_mode:
+            pending_after_each = self.settings.validation_policy == "after_each_mutation"
+            pending_batch_limit_reached = (
+                self.settings.validation_policy == "batch"
+                and state.unverified_mutation_count >= self.settings.mutation_batch_max
+            )
+            should_block_pending = strict_mode and (pending_after_each or pending_batch_limit_reached)
+            if should_block_pending:
+                previous_mode = state.forced_next_mode
+                set_forced_next_mode(
+                    session_id,
+                    mode="validate_only",
+                    target=pending_target,
+                    why=f"The current validation policy requires validation before more mutation on {pending_target}.",
+                    exit_condition=f"confirm the last change on {pending_target} landed as intended",
+                    allowed_actions=(
+                        f"read back {pending_target} directly",
+                        fastest,
+                    ),
+                    forbidden_actions=("further mutation", "alternate tools for the same mutation", "broad search or replanning"),
+                )
                 message = _render_block_message(
                     reason="pending_verification",
                     mode="validate_only",
@@ -1018,12 +1038,13 @@ class RuntimeHooks:
                     done_when=(f"confirm the last change on {pending_target} landed as intended",),
                     avoid=("further mutation", "alternate tools for the same mutation", "broad search or replanning"),
                 )
+                payload["_proofrail_previous_mode"] = previous_mode
                 return self._blocked(session_id, tool_name, payload, message, reason="pending_verification")
             if advisory_enabled:
                 self._advisory(
                     session_id,
                     reason="pending_verification",
-                    severity="risk" if state.unverified_mutation_count >= self.settings.mutation_batch_max else "warn",
+                    severity="risk" if (pending_after_each or pending_batch_limit_reached) else "warn",
                     target=pending_target,
                     message="A previous mutation has not been validated yet.",
                     fastest_next_action=fastest,
@@ -1039,6 +1060,7 @@ class RuntimeHooks:
                 )
 
         if state.forced_next_mode == "validate_only":
+            forced_target = compact_label(state.forced_next_target or target_label, 120)
             allowed_readback = _readback_validates_touched_file(
                 category=category,
                 payload=payload,
@@ -1050,27 +1072,49 @@ class RuntimeHooks:
             )
             allowed_validation = category == "exec" and (not mutating_exec) and is_likely_validation_exec(command)
             if is_mutation or (not allowed_readback and not allowed_validation):
-                message = _render_block_message(
-                    reason="pending_verification",
-                    mode="validate_only",
-                    target=target_label,
-                    why_blocked=f"the last change on {target_label} is not yet verified",
-                    subgoal=f"verify the last change on {target_label}",
-                    next_actions=(
-                        "read back the touched path directly",
-                        "run one narrow validation command against the same touched path/process",
-                        f"read back {target_label} directly",
-                        f"run one narrow validation against {target_label}",
-                    ),
-                    done_when=(f"confirm the last change on {target_label} landed as intended",),
-                    avoid=(
-                        "further mutation",
-                        "alternate tools for the same mutation",
-                        "broad search or replanning",
-                        "plugin internals or alternate mutation paths",
-                    ),
-                )
-                return self._blocked(session_id, tool_name, payload, message, reason="pending_verification")
+                if strict_mode:
+                    message = _render_block_message(
+                        reason="pending_verification",
+                        mode="validate_only",
+                        target=forced_target,
+                        why_blocked=f"the last change on {forced_target} is not yet verified",
+                        subgoal=f"verify the last change on {forced_target}",
+                        next_actions=(
+                            "read back the touched path directly",
+                            "run one narrow validation command against the same touched path/process",
+                            f"read back {forced_target} directly",
+                            f"run one narrow validation against {forced_target}",
+                        ),
+                        done_when=(f"confirm the last change on {forced_target} landed as intended",),
+                        avoid=(
+                            "further mutation",
+                            "alternate tools for the same mutation",
+                            "broad search or replanning",
+                            "plugin internals or alternate mutation paths",
+                        ),
+                    )
+                    return self._blocked(session_id, tool_name, payload, message, reason="pending_verification")
+                if advisory_enabled:
+                    self._advisory(
+                        session_id,
+                        reason="pending_verification",
+                        severity="risk" if self.settings.validation_policy == "after_each_mutation" else "warn",
+                        target=forced_target,
+                        message="Validate-only mode is active as a context hint, but enforcement is not strict.",
+                        fastest_next_action=f"validate {forced_target} with the narrowest check",
+                        allowed_next_actions=(
+                            f"read back {forced_target} directly",
+                            f"run one narrow validation against {forced_target}",
+                        ),
+                        risk_if_ignored="Continuing before validation can make later failures harder to attribute.",
+                        source="workflow",
+                        tool_name=tool_name,
+                        tool_intent=tool_intent,
+                        command=command,
+                        evidence_gap="narrow_validation",
+                        would_have_blocked_in_strict=True,
+                        mode="validate_only",
+                    )
 
         if state.evidence_count == 0 and (mutating_exec or mutation_touches_existing_path):
             target_hints = mutation_target_hints
@@ -1168,6 +1212,28 @@ class RuntimeHooks:
                     mode="gather_target_evidence",
                 )
 
+        if mutating_exec and state.evidence_count > 0 and not mutation_target_hints and advisory_enabled:
+            self._advisory(
+                session_id,
+                reason="unknown_target_mutation",
+                severity="warn",
+                target=compact_label(command or target_label, 120),
+                message="Mutating exec has no target hints, so existing evidence cannot prove target locality.",
+                fastest_next_action="inspect the command's actual target or working directory before relying on prior evidence",
+                allowed_next_actions=(
+                    "inspect the command's actual target",
+                    "inspect the working directory or package/config file the command will mutate",
+                ),
+                risk_if_ignored="A mutating command without target hints can change files or services unrelated to the evidence already gathered.",
+                source="workflow",
+                tool_name=tool_name,
+                tool_intent=tool_intent,
+                command=command,
+                evidence_gap="target_state",
+                would_have_blocked_in_strict=False,
+                mode="gather_target_evidence",
+            )
+
         if state.consecutive_low_signal >= self.settings.low_signal_block_threshold and state.last_low_signal_intent == tool_intent:
             fastest = f"Switch paths or probe shape once while staying on {target_label}"
             if strict_mode:
@@ -1248,7 +1314,8 @@ class RuntimeHooks:
                 )
             )
             if decision is not None:
-                _apply_classifier_mode(session_id, decision, target_label, self.audit)
+                if advisory_enabled:
+                    _apply_classifier_mode(session_id, decision, target_label, self.audit)
                 record_classifier_decision(
                     session_id,
                     decision=decision.decision,
@@ -1268,14 +1335,6 @@ class RuntimeHooks:
                     guidance=list(decision.guidance),
                 )
                 if decision.decision in {"block", "ask_user"}:
-                    if decision.decision == "ask_user" or decision.evidence_gap == "user_choice":
-                        def _remember_pending_choice(current) -> None:
-                            if current.approved_mutation_signature is None:
-                                current.pending_user_choice_signature = tool_intent
-                            elif current.pending_user_choice_signature is None:
-                                current.pending_user_choice_signature = current.approved_mutation_signature
-
-                        STATE_STORE.update(session_id, _remember_pending_choice)
                     classifier_state = STATE_STORE.snapshot(session_id)
                     classifier_target = classifier_state.forced_next_target or target_label
                     guidance_items = tuple(decision.guidance) if decision.guidance else (
@@ -1285,20 +1344,47 @@ class RuntimeHooks:
                         classifier_state.forced_next_exit_condition
                         or "satisfy the classifier-requested handoff before retrying the mutation"
                     )
-                    message = _render_block_message(
-                        reason="llm_classifier",
-                        mode=classifier_state.forced_next_mode,
-                        target=classifier_target,
-                        why_blocked=decision.reason or "the classifier found a real ambiguity in the requested mutation",
-                        subgoal=_subgoal_for_mode(classifier_state, classifier_target),
-                        next_actions=guidance_items,
-                        done_when=(done_when,),
-                        avoid=tuple(classifier_state.forbidden_next_actions) or (
-                            "guess the missing user preference",
-                            "route around the handoff with an equivalent mutation",
-                        ),
-                    )
-                    return self._blocked(session_id, tool_name, payload, message, reason="llm_classifier")
+                    if strict_mode:
+                        if decision.decision == "ask_user" or decision.evidence_gap == "user_choice":
+                            def _remember_pending_choice(current) -> None:
+                                if current.approved_mutation_signature is None:
+                                    current.pending_user_choice_signature = tool_intent
+                                elif current.pending_user_choice_signature is None:
+                                    current.pending_user_choice_signature = current.approved_mutation_signature
+
+                            STATE_STORE.update(session_id, _remember_pending_choice)
+                        message = _render_block_message(
+                            reason="llm_classifier",
+                            mode=classifier_state.forced_next_mode,
+                            target=classifier_target,
+                            why_blocked=decision.reason or "the classifier found a real ambiguity in the requested mutation",
+                            subgoal=_subgoal_for_mode(classifier_state, classifier_target),
+                            next_actions=guidance_items,
+                            done_when=(done_when,),
+                            avoid=tuple(classifier_state.forbidden_next_actions) or (
+                                "guess the missing user preference",
+                                "route around the handoff with an equivalent mutation",
+                            ),
+                        )
+                        return self._blocked(session_id, tool_name, payload, message, reason="llm_classifier")
+                    if advisory_enabled:
+                        self._advisory(
+                            session_id,
+                            reason="classifier",
+                            severity="risk" if decision.decision == "block" else "warn",
+                            target=classifier_target,
+                            message=decision.reason or "Classifier found a gray-area workflow risk.",
+                            fastest_next_action=guidance_items[0] if guidance_items else None,
+                            allowed_next_actions=guidance_items,
+                            risk_if_ignored="The classifier found a workflow ambiguity that would have blocked in strict mode.",
+                            source=decision.source,
+                            tool_name=tool_name,
+                            tool_intent=tool_intent,
+                            command=command,
+                            evidence_gap=decision.evidence_gap,
+                            would_have_blocked_in_strict=True,
+                            mode=classifier_state.forced_next_mode,
+                        )
 
         self.audit.record(
             "tool_preflight",
@@ -1344,6 +1430,9 @@ class RuntimeHooks:
         )
         validation_succeeded = (validating_exec and status == "success") or readback_validation_succeeded
         validation_suggestions = suggest_validations(tool_name=tool_name, args=payload, command=command, mutating_exec=mutating_exec)
+        tool_intent = build_tool_intent_signature(tool_name, payload, self.tool_aliases)
+        mutation_succeeded = (category == "write" or mutating_exec) and not error_text.strip()
+        low_signal_result = False if validation_succeeded else is_low_signal_observation(tool_name, text, error_text)
         state = record_tool_observation(
             session_id=session_id,
             tool_name=tool_name,
@@ -1355,9 +1444,40 @@ class RuntimeHooks:
             tool_aliases=self.tool_aliases,
             touched_paths=touched_paths,
             validation_suggestions=validation_suggestions,
-            enforce_forced_modes=self.settings.enforcement_mode == "strict",
-            track_verification=self.settings.validation_policy != "off",
+            enforce_forced_modes=(
+                self.settings.enforcement_mode == "strict"
+                and self.settings.validation_policy == "after_each_mutation"
+            ),
         )
+        ignored_advisory = prior_state.last_advisory
+        ignored_reason: str | None = None
+        if ignored_advisory is not None and not ignored_advisory.ignored:
+            if ignored_advisory.reason in {"missing_evidence", "broad_evidence"}:
+                if mutation_succeeded and not _has_target_local_evidence(prior_state, touched_paths, self.root_dir):
+                    ignored_reason = ignored_advisory.reason
+            elif ignored_advisory.reason == "pending_verification":
+                if mutation_succeeded and not validation_succeeded:
+                    ignored_reason = ignored_advisory.reason
+            elif ignored_advisory.reason == "low_signal_repeat":
+                if low_signal_result and ignored_advisory.tool_intent == tool_intent:
+                    ignored_reason = ignored_advisory.reason
+            elif ignored_advisory.reason == "unknown_target_mutation":
+                if mutation_succeeded:
+                    ignored_reason = ignored_advisory.reason
+        if ignored_reason is not None:
+            state = record_advisory_ignored(session_id, reason=ignored_reason)
+            self.audit.record(
+                "advisory_ignored",
+                session_id=session_id or "default",
+                reason=ignored_reason,
+                severity=ignored_advisory.severity if ignored_advisory is not None else None,
+                target=ignored_advisory.target if ignored_advisory is not None else None,
+                tool_name=tool_name,
+                tool_intent=tool_intent,
+                command=command,
+                evidence_gap=ignored_advisory.evidence_gap if ignored_advisory is not None else None,
+                enforcement_mode=self.settings.enforcement_mode,
+            )
         if tool_name == "clarify" and prior_state.pending_user_choice_signature and not error_text.strip() and _looks_like_affirmative_choice(text):
             def _approve_user_choice(current) -> None:
                 current.approved_mutation_signature = prior_state.pending_user_choice_signature

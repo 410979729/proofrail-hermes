@@ -82,12 +82,12 @@ If the target instance already has other plugins, append `proofrail` to the exis
 
 1. **Default `enforcement_mode` is `advisory`**: workflow risks are recorded and injected as compact next-action cards, but normal tool calls continue.
 2. **Strict compatibility is explicit**: set `enforcement_mode: strict` to restore the older hard-block cooperative modes for missing evidence, pending verification, broad evidence, and repeated low-signal probes.
-3. **Dangerous terminal commands are policy-driven**: `warn` creates advisory + audit + allow, `allow` audits + allows, `block` blocks, and `approve` fail-closes in Hermes until a real approval route exists.
-4. **Validation policy defaults to `batch`** with `mutation_batch_max: 5`; `after_each_mutation` and `off` are also supported.
+3. **Dangerous terminal commands are policy-driven**: `warn` creates advisory + audit + allow in advisory mode, `allow` audits + allows, `block` blocks, and `approve` fail-closes in Hermes until a real approval route exists. `guarded` mode hard-blocks critical dangerous commands under `warn`.
+4. **Validation policy defaults to `batch`** with `mutation_batch_max: 5`; `after_each_mutation` and `off` are also supported. In strict mode, `batch` blocks only at the batch limit, while `after_each_mutation` blocks the next mutation immediately.
 5. **Large tool output is summarized through `transform_tool_result`** while retaining actionable diagnostics from omitted middle sections.
 6. **`pre_llm_call` injects phase-aware runtime context or compact advisory cards**.
 7. **After changes, the plugin injects touched files, validation hints, and final evidence-report requirements**.
-8. **Classifier interventions can still route the runtime into `change_strategy` or `user_choice` instead of leaving the model to guess the shortest valid next step**.
+8. **Classifier interventions can still route the runtime into `change_strategy` or `user_choice` instead of leaving the model to guess the shortest valid next step; classifier `block` / `ask_user` only hard-block in strict mode**.
 9. **Successful validation explicitly reopens forward progress and emits a semantic audit event**.
 
 ## Configuration

@@ -57,7 +57,7 @@ def test_forced_mode_transition_is_audited(tmp_path: Path) -> None:
         )
 
     hooks = build_runtime_hooks(
-        settings=PluginSettings(audit_log_path=str(audit_path)),
+        settings=PluginSettings(enforcement_mode="strict", audit_log_path=str(audit_path)),
         root_dir=str(tmp_path),
         classifier=fake_classifier,
     )
