@@ -141,9 +141,9 @@ Responsibilities:
 - inject phase summaries and runtime reminders
 - append context rather than rewriting the system prompt
 
-## Current v0.0.6 release line
+## Current v0.0.7 release line
 
-The public `v0.0.6` / `0.0.6` release line includes:
+The public `v0.0.7` / `0.0.7` release line includes:
 
 1. default `enforcement_mode=advisory`; workflow risks are recorded as advisories and compact next-action cards instead of blocking tool calls
 2. explicit `enforcement_mode=strict` compatibility for the older hard-block cooperative modes

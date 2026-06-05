@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.0.7 - 2026-06-05
+
 - Complete advisory-first cleanup for classifier `block` / `ask_user`, stale `validate_only` forced modes, guarded critical dangerous commands, advisory ignored audit events, validation-policy batch semantics, advisory injection modes, default tool aliases, and unknown-target mutating exec advisories.
 
 ## v0.0.6 - 2026-06-04
