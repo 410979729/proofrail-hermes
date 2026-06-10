@@ -121,6 +121,23 @@ def test_command_path_hints_keep_real_stdout_redirection_target() -> None:
     assert changed_path_hints("terminal", {}, "printf ok >/tmp/proofrail-out.txt") == ["/tmp/proofrail-out.txt"]
 
 
+def test_command_path_hints_ignore_windows_style_command_switches() -> None:
+    hints = changed_path_hints(
+        "terminal",
+        {},
+        'schtasks /End /TN "nightly job" /F C:/real/path/config.json',
+    )
+
+    assert "/End" not in hints
+    assert "/TN" not in hints
+    assert "/F" not in hints
+    assert "C:/real/path/config.json" in hints
+
+
+def test_command_path_hints_keep_posix_single_segment_absolute_path() -> None:
+    assert changed_path_hints("terminal", {}, "touch /tmp") == ["/tmp"]
+
+
 def test_command_path_hints_ignore_python_dash_c_inline_code() -> None:
     hints = changed_path_hints(
         "terminal",

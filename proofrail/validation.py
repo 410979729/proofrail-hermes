@@ -20,6 +20,29 @@ _DOC_SUFFIXES = {".md", ".rst", ".txt"}
 _SHELL_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\+?=")
 _REDIRECT_PREFIX_RE = re.compile(r"^(?P<op>\d*(?:>>?|<<?)|&>|\d*>&)(?P<target>.*)$")
 _PYTHON_EXECUTABLE_RE = re.compile(r"^(?:python(?:\d+(?:\.\d+)?)?|pythonw(?:\d+(?:\.\d+)?)?|pypy(?:\d+(?:\.\d+)?)?)$")
+_WINDOWS_STYLE_SWITCH_RE = re.compile(r"^/[A-Za-z][A-Za-z0-9?]*$")
+_WINDOWS_SWITCH_COMMANDS = {
+    "cmd",
+    "cmd.exe",
+    "powershell",
+    "powershell.exe",
+    "pwsh",
+    "pwsh.exe",
+    "reg",
+    "reg.exe",
+    "robocopy",
+    "robocopy.exe",
+    "sc",
+    "sc.exe",
+    "schtasks",
+    "schtasks.exe",
+    "taskkill",
+    "taskkill.exe",
+    "tasklist",
+    "tasklist.exe",
+    "wmic",
+    "wmic.exe",
+}
 
 
 def changed_path_hints(tool_name: str, args: dict[str, object], command: str = "") -> list[str]:
@@ -86,6 +109,7 @@ def _command_path_hints(command: str) -> list[str]:
     seen: set[str] = set()
     python_arg_mode = False
     skip_next_python_code = False
+    windows_switch_mode = bool(parts and _is_windows_switch_command(parts[0]))
     for raw_part in parts:
         if skip_next_python_code:
             skip_next_python_code = False
@@ -111,7 +135,7 @@ def _command_path_hints(command: str) -> list[str]:
                 continue
             python_arg_mode = False
 
-        for candidate in _path_candidates_from_shell_token(raw_part):
+        for candidate in _path_candidates_from_shell_token(raw_part, ignore_windows_switches=windows_switch_mode):
             if candidate and candidate not in seen:
                 seen.add(candidate)
                 out.append(candidate)
@@ -123,13 +147,24 @@ def _is_python_executable_token(raw_value: str) -> bool:
     return bool(_PYTHON_EXECUTABLE_RE.fullmatch(Path(value).name))
 
 
-def _path_candidates_from_shell_token(raw_value: str) -> list[str]:
+def _is_windows_switch_command(raw_value: str) -> bool:
+    value = raw_value.strip().strip("'\"")
+    return Path(value).name.lower() in _WINDOWS_SWITCH_COMMANDS
+
+
+def _is_windows_style_switch(value: str) -> bool:
+    return bool(_WINDOWS_STYLE_SWITCH_RE.fullmatch(value))
+
+
+def _path_candidates_from_shell_token(raw_value: str, *, ignore_windows_switches: bool = False) -> list[str]:
     value = raw_value.strip().strip("'\"`).,;(){}[]")
     if not value or value in {"|", "||", "&", "&&", ";"}:
         return []
     if value.startswith(("http://", "https://")):
         return []
     if value.startswith("-"):
+        return []
+    if ignore_windows_switches and _is_windows_style_switch(value):
         return []
     # Environment / shell assignment prefixes are context, not touched paths.
     # Keep the whole token ignored so ``PLUGIN=/path`` cannot become either

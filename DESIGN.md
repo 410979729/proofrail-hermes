@@ -141,9 +141,9 @@ Responsibilities:
 - inject phase summaries and runtime reminders
 - append context rather than rewriting the system prompt
 
-## Current v0.0.7 release line
+## Current v0.0.8 release line
 
-The public `v0.0.7` / `0.0.7` release line includes:
+The public `v0.0.8` / `0.0.8` release line includes:
 
 1. default `enforcement_mode=advisory`; workflow risks are recorded as advisories and compact next-action cards instead of blocking tool calls
 2. explicit `enforcement_mode=strict` compatibility for the older hard-block cooperative modes
@@ -159,13 +159,13 @@ The public `v0.0.7` / `0.0.7` release line includes:
 12. `forced_mode_transition` audit events from classifier, strict block, and tool-observation sources
 13. `forward_progress_reopened` semantics when validation clears `validate_only`
 14. diagnostic-preserving large-output summaries that keep `FAILED`, `ERROR`, traceback, and assertion lines from omitted middle sections
-15. phantom-target recovery hardening for shell assignment tokens, suppression redirects, directory-level targets, and handoff wording compatibility
+15. phantom-target recovery hardening for shell assignment tokens, suppression redirects, directory-level targets, Windows slash-style command switches, and handoff wording compatibility
 16. behavior-simulation, advisory-runtime, and self-smoke coverage for the runtime path
 
 ## Version semantics
 
-- GitHub release/tag line: `v0.0.6`
-- Python package version: `0.0.6`
+- GitHub release/tag line: `v0.0.8`
+- Python package version: `0.0.8`
 
 This split is intentional: GitHub tags keep the leading `v`, while Python packaging follows PEP 440.
 

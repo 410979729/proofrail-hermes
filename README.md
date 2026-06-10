@@ -37,13 +37,13 @@ For Hermes, that means a runtime plugin that can:
 
 ## Current status
 
-- Version: `v0.0.7`
+- Version: `v0.0.8`
 - Host: **Hermes Agent plugin hooks**
 - Language: **Python**
 
-> Version note: the GitHub release/tag line is `v0.0.7`, while the Python package and wheel version is `0.0.7` to follow PEP 440. They refer to the same release.
+> Version note: the GitHub release/tag line is `v0.0.8`, while the Python package and wheel version is `0.0.8` to follow PEP 440. They refer to the same release.
 
-The current main branch is the `v0.0.7` line: default workflow risks are recorded as compact runtime guidance, while `enforcement_mode: strict` preserves the older hard-block/cooperative-mode behavior for operators that want it.
+The current main branch is the `v0.0.8` line: default workflow risks are recorded as compact runtime guidance, while `enforcement_mode: strict` preserves the older hard-block/cooperative-mode behavior for operators that want it. This line also fixes Windows slash-style command switches such as `schtasks /End /TN ...` so they do not become phantom validation targets.
 
 ## Quick start
 
