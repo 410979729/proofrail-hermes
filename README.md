@@ -40,15 +40,15 @@ For Hermes, that means a runtime plugin that can:
 
 ## Current status
 
-- Version: `v0.0.9`
+- Version: `v0.0.10`
 - Product name: **LoopCraft**
 - Compatibility package/plugin key: `proofrail`
 - Host: **Hermes Agent plugin hooks**
 - Language: **Python**
 
-> Version note: the GitHub release/tag line is `v0.0.9`, while the Python package and wheel version is `0.0.9` to follow PEP 440. They refer to the same release.
+> Version note: the GitHub release/tag line is `v0.0.10`, while the Python package and wheel version is `0.0.10` to follow PEP 440. They refer to the same release.
 
-The current main branch is the `v0.0.9` line: LoopCraft is the user-facing product name, while the package/plugin key remains `proofrail` for compatibility. Default workflow risks are recorded as compact runtime guidance, while `enforcement_mode: strict` preserves the older hard-block/cooperative-mode behavior for operators that want it.
+The current main branch is the `v0.0.10` line: LoopCraft is the user-facing product name, while the package/plugin key remains `proofrail` for compatibility. Default workflow risks are recorded as compact runtime guidance, while `enforcement_mode: strict` preserves the older hard-block/cooperative-mode behavior for operators that want it.
 
 ## Quick start
 
@@ -78,6 +78,7 @@ If the target instance already has other plugins, append `proofrail` to the exis
 - **mode-specific task handoffs** — inject collaboration-framed task panels so the next legal move feels like progress instead of punishment
 - **low-signal probe advisories** — warn on repeated no-progress probing loops by default; strict mode can still block them
 - **gray-area classifier fallback + mode mapping** — when structured output is unsupported, fall back to rule-based classification; when the classifier does intervene, map it into cooperative runtime modes
+- **cleanup reminder only** — LoopCraft never deletes files automatically; closeout guidance asks the agent to report cleanup status and artifact categorization/classification
 - **dangerous command audit** — detect high-risk commands and surface them back into reasoning context
 - **large output summarization** — compress oversized tool output before reinjection while preserving diagnostic lines from omitted middle sections
 - **session-scoped workflow state** — maintain Observe / Execute / Review phase per session

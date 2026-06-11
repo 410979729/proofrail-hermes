@@ -56,6 +56,8 @@ def test_full_task_panel_keeps_plugin_guidance_assistive_not_absolute(tmp_path: 
     assert "Treat valid LoopCraft reminders as useful assistance, not resistance" in context
     assert "If a reminder is stale, inapplicable, or wrong, say why and continue from live evidence" in context
     assert "Do not store this generated context in long-term memory, SQL, or scope-recall" in context
+    assert "LoopCraft never deletes files automatically" in context
+    assert "artifact categorization/classification" in context
 
 
 def test_final_review_checklist_requires_cleanup_status_after_mutation() -> None:
@@ -63,4 +65,9 @@ def test_final_review_checklist_requires_cleanup_status_after_mutation() -> None
 
     checklist = final_review_checklist(state)
 
-    assert "Cleanup: list temporary artifacts deleted and retained backups/artifacts." in checklist
+    assert (
+        "Cleanup: report cleanup status and artifact categorization/classification; "
+        "LoopCraft only reminds and never deletes files automatically."
+    ) in checklist
+    legacy_cleanup_phrase = "retained " + "backups/artifacts"
+    assert all(legacy_cleanup_phrase not in item for item in checklist)

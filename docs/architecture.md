@@ -102,7 +102,7 @@ on_session_end / on_session_finalize
 4. **Generated context provenance**: injected LoopCraft/Proofrail panels are runtime context, not user speech, and must not be stored in SQL/scope-recall/long-term memory as user facts.
 5. **Assistive reminders**: agents should evaluate reminders against the user's request and live evidence, follow applicable reminders, and state why when a reminder is stale or wrong.
 6. **Audit over approval**: high-risk commands can be allowed in autonomous mode, but they must be audited and reflected back into the next reasoning context.
-7. **Final evidence + cleanup report**: if a session mutates state, the final answer should include root cause, changes, validation, evidence, cleanup status, and remaining risk.
+7. **Final evidence + cleanup report**: if a session mutates state, the final answer should include root cause, changes, validation, evidence, cleanup status, artifact categorization/classification, and remaining risk.
 8. **Defensive, not sandbox**: this plugin is a workflow harness, not an OS permission boundary or full shell parser.
 
 ## Current limits
@@ -111,7 +111,7 @@ on_session_end / on_session_finalize
 - `explain_state()` is currently a runtime helper, not a first-class Hermes tool schema.
 - The validation suggestions are best-effort and should be treated as prompts to self-verify, not as guaranteed complete test plans.
 - No durable task ledger or compaction snapshot persistence yet.
-- Cleanup is a required closeout reminder after mutations; the plugin does not automatically delete files.
+- Cleanup is a required closeout reminder after mutations; LoopCraft never deletes files automatically. It only reminds the agent to report cleanup status and artifact categorization/classification.
 
 ## Why this shape is open-source friendly
 

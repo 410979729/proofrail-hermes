@@ -145,7 +145,7 @@ def final_review_checklist(state: SessionRuntimeState) -> list[str]:
         "Changes: list the files, configs, or command paths you changed.",
         "Validation: list the commands you actually ran and their results.",
         "Evidence: cite the key tool results, test results, or log facts.",
-        "Cleanup: list temporary artifacts deleted and retained backups/artifacts.",
+        "Cleanup: report cleanup status and artifact categorization/classification; LoopCraft only reminds and never deletes files automatically.",
         "Remaining risks: note any unverified points, environment limits, or follow-up advice.",
     ]
     if state.pending_verification:

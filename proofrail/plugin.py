@@ -472,6 +472,8 @@ def _render_task_panel(state, task_text: str = "") -> str:
             f"- {_mode_specific_handoff_line(state, target)}",
             "- Treat valid LoopCraft reminders as useful assistance, not resistance.",
             "- If a reminder is stale, inapplicable, or wrong, say why and continue from live evidence.",
+            "- LoopCraft never deletes files automatically; it only reminds the agent to report cleanup status.",
+            "- Cleanup includes artifact categorization/classification, not just removing obvious junk.",
             "- This handoff is part of the task, not a refusal.",
             "- The fastest path forward is to satisfy this subgoal directly.",
             "- Complete this subtask to reopen forward progress.",

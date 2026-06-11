@@ -1,12 +1,17 @@
 # Changelog
 
+## v0.0.10 - 2026-06-11
+
+- Clarify cleanup semantics: LoopCraft never deletes files automatically; it only reminds the agent to report cleanup status.
+- Replace the closeout cleanup wording with artifact categorization/classification rather than backup management.
+
 ## v0.0.9 - 2026-06-11
 
 - Position the project as **LoopCraft**, a Hermes-native loop engineering runtime, while retaining the `proofrail` package/plugin key for compatibility.
 - Add `docs/loopcraft-functional-roadmap.md`, a feature roadmap grounded in Superpowers, Codex, Claude Code, Cline, Roo Code, Aider, Continue, and OpenHands patterns.
 - Add an advisory-only LoopCraft task-understanding snapshot plus an Agent Self-Routing Checkpoint that prompts the primary agent to decide `intent / domain / risk / stage / next` itself, without strong control or tool-permission effects.
 - Mark generated LoopCraft/Proofrail context as non-user, non-memory-provider input, explicitly warning agents not to store it in long-term memory, SQL, or scope-recall as a user fact.
-- Add closeout cleanup to final-report requirements so agents must report temporary artifacts deleted and retained backups/artifacts after mutations.
+- Add closeout cleanup to final-report requirements so agents must report cleanup status and retained artifact categories after mutations.
 - Reframe reminders as assistive guidance: agents should evaluate them against user intent and live evidence, follow applicable reminders, and state why when a reminder is stale or wrong instead of silently routing around it.
 
 ## v0.0.8 - 2026-06-10

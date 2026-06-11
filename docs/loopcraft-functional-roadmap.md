@@ -22,7 +22,7 @@ This roadmap is based on the current Proofrail/LoopCraft codebase plus patterns 
 5. **Every loop has an exit condition.** Each mode must say what unlocks forward progress.
 6. **Generated context is not memory or user speech.** LoopCraft/Proofrail injected panels must be marked as generated runtime context; agents and memory providers should not store them in SQL, scope-recall, or long-term memory as user facts.
 7. **Assistive reminders, not resistance.** Agents should evaluate LoopCraft reminders against the user request and live evidence, follow applicable reminders, and explicitly say why when a reminder is stale or wrong.
-8. **Closeout includes cleanup.** After mutations, final-report guidance should include temporary artifact cleanup and retained backup/artifact disclosure.
+8. **Closeout includes cleanup reminders only.** After mutations, final-report guidance should include cleanup status and artifact categorization/classification. LoopCraft must never delete files automatically.
 
 ## P0 — Highest Functional Value
 
@@ -42,7 +42,7 @@ Candidate profiles:
 
 - `coding_change`: inspect → failing test → minimal implementation → validation → report.
 - `debugging`: reproduce → isolate root cause → fix → regression test → report.
-- `ops_change`: identify live target → backup → minimal mutation → health/log verification → cleanup.
+- `ops_change`: identify live target → record rollback path if needed → minimal mutation → health/log verification → cleanup reminder.
 - `review_only`: read diff/source → list findings by severity → no mutation.
 - `research`: gather sources → cross-check → synthesize → cite limitations.
 
@@ -94,7 +94,7 @@ Existing baseline: old Proofrail already has `SessionPhase = observe|execute|rev
 - `plan`: gather evidence and propose approach; mutation discouraged.
 - `act`: allow minimal mutation when evidence exists.
 - `verify`: make missing validation highly visible after mutation.
-- `closeout`: prompt for final evidence, cleanup status, retained artifacts, and remaining risk.
+- `closeout`: prompt for final evidence, cleanup status, artifact categorization/classification, and remaining risk.
 
 Implementation shape:
 
@@ -136,15 +136,15 @@ Implementation shape:
 
 Borrow Cline's checkpoint concept, but keep it Git-friendly.
 
-Joy pain point: backups are good, but repeated agent work leaves too many useless backups. Rollback receipts must be designed together with closeout cleanup, not as another pile of permanent `.bak` directories.
+Joy pain point: repeated agent work leaves confusing artifacts and junk. Rollback receipts and other retained materials must be classified together with closeout cleanup, not left as another pile of permanent scratch directories.
 
 Implementation shape:
 
 - Before risky mutations, record `git diff --binary` or a shadow snapshot path when inside a Git repo.
 - Add rollback metadata to the task ledger.
 - Do not auto-restore without explicit user approval.
-- Classify backup artifacts: `temporary`, `rollback-needed`, `audit-evidence`, or `deliverable`.
-- At closeout, delete temporary backups, keep only rollback/audit evidence, and report retained paths with reasons.
+- Classify artifacts: `temporary`, `rollback-needed`, `audit-evidence`, or `deliverable`.
+- At closeout, report temporary junk cleanup and retained artifact categories with reasons. LoopCraft only reminds; it never deletes files automatically.
 - Prefer compact rollback receipts over full directory copies when a Git diff or exact old-string patch is enough.
 
 ### 7. Subtask / Boomerang Handoff Protocol
