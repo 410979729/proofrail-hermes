@@ -1,8 +1,8 @@
-# DESIGN
+# LoopCraft Design
 
 ## Goal
 
-Build a **Hermes-native Python plugin** that turns a focused set of runtime workflow guardrails into a clear, testable, publishable implementation, with priority on:
+Build **LoopCraft**, a Hermes-native Python loop engineering plugin that turns a focused set of runtime workflow reminders into a clear, testable, publishable implementation, with priority on:
 
 1. accurate hook mapping
 2. a simple, explicit state machine
@@ -23,7 +23,7 @@ All important constraints should live in Hermes hooks:
 - `on_session_end`
 - `on_session_finalize`
 
-Prompt text is only a lightweight reminder layer. It does not carry the real enforcement burden.
+Prompt text is only a lightweight reminder layer. It does not carry the real enforcement burden, and injected runtime context must be clearly marked as generated context rather than user speech.
 
 ### 2. Shared policy, host-native wiring
 
@@ -63,7 +63,9 @@ Current test coverage includes:
 - repeated low-signal probes record advisories by default, and block only in `strict` mode
 - tool-result summarization
 - stage-aware `pre_llm_call` context
-- session end/finalize cleanup
+- session end/finalize runtime-state cleanup
+- mutation closeout includes final-report cleanup status
+- generated LoopCraft context is not treated as user speech or memory-provider input
 
 ## Runtime Model
 
@@ -143,7 +145,7 @@ Responsibilities:
 
 ## Current v0.0.8 release line
 
-The public `v0.0.8` / `0.0.8` release line includes:
+The public `v0.0.8` / `0.0.8` release line is the LoopCraft repositioning line. It keeps the package/plugin key `proofrail` for compatibility and includes:
 
 1. default `enforcement_mode=advisory`; workflow risks are recorded as advisories and compact next-action cards instead of blocking tool calls
 2. explicit `enforcement_mode=strict` compatibility for the older hard-block cooperative modes
@@ -151,7 +153,7 @@ The public `v0.0.8` / `0.0.8` release line includes:
 4. a JSONL audit trail for session lifecycle, tool preflight, dangerous commands, tool results, advisories, and large-output summarization
 5. a validation-suggestion layer that proposes narrow follow-up checks from touched files and command shape
 6. session state for mutation / validation / dangerous-command counts, touched files, validation suggestions, advisories, recent labels, and task-ledger state
-7. `pre_llm_call` injection of touched files, suggested validations, dangerous-command audit reminders, compact advisory cards, and final evidence-report requirements
+7. `pre_llm_call` injection of touched files, suggested validations, dangerous-command audit reminders, compact advisory cards, Agent Self-Routing Checkpoints, and final evidence/cleanup-report requirements
 8. explicit forced modes: `gather_target_evidence`, `validate_only`, `change_strategy`, and `user_choice` for strict/classifier paths
 9. task-panel handoff framing with allowed / forbidden next actions and mode-specific collaboration wording
 10. classifier fallback from unsupported structured output into `RuleBasedGrayAreaClassifier`
@@ -160,7 +162,7 @@ The public `v0.0.8` / `0.0.8` release line includes:
 13. `forward_progress_reopened` semantics when validation clears `validate_only`
 14. diagnostic-preserving large-output summaries that keep `FAILED`, `ERROR`, traceback, and assertion lines from omitted middle sections
 15. phantom-target recovery hardening for shell assignment tokens, suppression redirects, directory-level targets, Windows slash-style command switches, and handoff wording compatibility
-16. behavior-simulation, advisory-runtime, and self-smoke coverage for the runtime path
+16. behavior-simulation, advisory-runtime, self-routing, assistive-hygiene, and self-smoke coverage for the runtime path
 
 ## Version semantics
 

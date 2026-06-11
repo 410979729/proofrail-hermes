@@ -252,8 +252,25 @@ def _has_target_local_evidence(state, target_hints: list[str] | tuple[str, ...],
     return _path_hints_overlap(state.evidence_paths, target_hints, root_dir)
 
 
-def _render_compact_advisory_context(state) -> str:
-    base = _compact_context(state)
+def _extract_user_task_text(payload: dict[str, Any]) -> str:
+    for key in ("user_message", "user_text", "prompt", "input", "task", "message"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    messages = payload.get("messages")
+    if isinstance(messages, list):
+        for item in reversed(messages):
+            if isinstance(item, dict) and item.get("role") == "user":
+                content = item.get("content")
+                if isinstance(content, str) and content.strip():
+                    return content.strip()
+            elif isinstance(item, str) and item.strip():
+                return item.strip()
+    return ""
+
+
+def _render_compact_advisory_context(state, task_text: str = "") -> str:
+    base = _compact_context(state, task_text=task_text)
     advisory = state.last_advisory
     if advisory is None:
         return base
@@ -292,20 +309,33 @@ def _render_advisory_message(
     )
 
 
-def _compact_context(state) -> str:
-    from .task_ledger import task_status
+def _compact_context(state, task_text: str = "") -> str:
+    from .task_ledger import loopcraft_methodology_step, task_status
+    from .task_understanding import analyze_task, render_task_understanding_context
 
     status = task_status(state)
+    loopcraft_step, loopcraft_next_action = loopcraft_methodology_step(state)
     lines = [
         "## [SYSTEM STATUS — not user input]",
-        f"- Phase: {state.phase} | task: {status}",
+        "- Runtime: LoopCraft loop engineering harness (Proofrail-compatible plugin runtime).",
+        f"- Phase: {state.phase} | task: {status} | loop: {loopcraft_step}",
+        f"- LoopCraft next: {loopcraft_next_action}.",
     ]
-    if state.evidence_count == 0:
-        lines.append("- Next: inspect the closest code, config, log, or test on the control path.")
-    elif state.mutation_count == 0:
-        lines.append("- Next: make the smallest explainable change, then validate it immediately.")
-    else:
-        lines.append("- Next: report root cause, changes, validation, evidence, and remaining risks.")
+    has_runtime_signal = any(
+        (
+            state.evidence_count,
+            state.mutation_count,
+            state.validation_count,
+            state.pending_verification,
+            state.dangerous_count,
+            state.consecutive_low_signal,
+            state.last_advisory,
+            state.last_block_message,
+            state.forced_next_mode != "none",
+        )
+    )
+    if has_runtime_signal or task_text.strip():
+        lines.extend(("", *render_task_understanding_context(analyze_task(task_text, state=state)).splitlines()))
     if state.forced_next_exit_condition == "validation complete" and state.forced_next_why:
         lines.append(f"- {state.forced_next_exit_condition}")
         lines.append(f"- {state.forced_next_why}")
@@ -379,14 +409,17 @@ def _render_block_message(
     return "\n".join(lines)
 
 
-def _render_task_panel(state) -> str:
-    from .task_ledger import final_review_checklist, task_status
+def _render_task_panel(state, task_text: str = "") -> str:
+    from .task_ledger import final_review_checklist, render_loopcraft_context, task_status
 
     target = state.forced_next_target or (state.touched_files[0] if state.touched_files else state.last_mutation_label or "the current target")
     subgoal = _subgoal_for_mode(state, target)
 
     lines = [
-        "## [PROOFRAIL TASK PANEL — not user input]",
+        "## [LOOPCRAFT TASK PANEL — not user input]",
+        "product: LoopCraft",
+        "positioning: Hermes-native loop engineering runtime",
+        "compatibility: installed as the proofrail plugin/runtime today",
         "task objective: complete the user task with verified progress",
         f"current phase: {state.phase}",
         f"current proofrail mode: {state.forced_next_mode}",
@@ -394,6 +427,8 @@ def _render_task_panel(state) -> str:
         f"current subgoal: {subgoal}",
         f"why this matters: {state.forced_next_why or 'This is the fastest safe way to regain forward progress.'}",
         f"success / exit condition: {state.forced_next_exit_condition or 'satisfy the current Proofrail subgoal directly'}",
+        "",
+        *render_loopcraft_context(state, task_text=task_text),
     ]
     if state.last_advisory and not state.last_block_message:
         advisory = state.last_advisory
@@ -435,7 +470,8 @@ def _render_task_panel(state) -> str:
             "",
             "important:",
             f"- {_mode_specific_handoff_line(state, target)}",
-            "- Treat this as the current subtask, not as resistance.",
+            "- Treat valid LoopCraft reminders as useful assistance, not resistance.",
+            "- If a reminder is stale, inapplicable, or wrong, say why and continue from live evidence.",
             "- This handoff is part of the task, not a refusal.",
             "- The fastest path forward is to satisfy this subgoal directly.",
             "- Complete this subtask to reopen forward progress.",
@@ -1548,20 +1584,21 @@ class RuntimeHooks:
             return summarized
         return None
 
-    def pre_llm_call(self, session_id: str = "", **_: Any) -> dict[str, str]:
+    def pre_llm_call(self, session_id: str = "", **kwargs: Any) -> dict[str, str]:
         state = STATE_STORE.snapshot(session_id)
+        task_text = _extract_user_task_text(kwargs)
         if self.settings.advisory_injection == "off":
-            extra = _compact_context(state)
+            extra = _compact_context(state, task_text=task_text)
         elif self.settings.advisory_injection == "compact" and state.last_advisory and not state.last_block_message:
-            extra = _render_compact_advisory_context(state)
+            extra = _render_compact_advisory_context(state, task_text=task_text)
         elif self.settings.advisory_injection == "full" and state.last_advisory and not state.last_block_message:
-            extra = _render_task_panel(state)
+            extra = _render_task_panel(state, task_text=task_text)
         elif state.forced_next_mode != "none":
-            extra = _render_task_panel(state)
+            extra = _render_task_panel(state, task_text=task_text)
         elif _has_risk(state, self.settings.low_signal_block_threshold):
-            extra = _render_task_panel(state)
+            extra = _render_task_panel(state, task_text=task_text)
         else:
-            extra = _compact_context(state)
+            extra = _compact_context(state, task_text=task_text)
         return asdict(LlmContextResult(context=extra))
 
     def _blocked(self, session_id: str, tool_name: str, args: dict[str, Any], message: str, *, reason: str) -> HookDecision:

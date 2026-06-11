@@ -1,6 +1,6 @@
 name: proofrail
 version: v0.0.8
-description: Runtime harness plugin for Hermes with evidence-first execution, verification guidance, non-blocking workflow risk hints, and optional LLM gray-area classification.
+description: LoopCraft loop engineering runtime for Hermes; installed as proofrail for compatibility, with evidence-first execution, verification guidance, non-blocking workflow risk hints, and optional LLM gray-area classification.
 author: Yuheng
 provides_hooks:
   - on_session_start

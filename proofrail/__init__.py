@@ -1,4 +1,4 @@
-"""Proofrail runtime harness plugin."""
+"""LoopCraft loop engineering runtime, installed as the proofrail plugin."""
 from .classifier import (
     GuardrailClassifierDecision,
     HermesLlmGuardrailClassifier,

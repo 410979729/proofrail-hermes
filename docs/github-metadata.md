@@ -6,9 +6,11 @@ This document records the public GitHub metadata currently used for the Hermes r
 
 `proofrail-hermes`
 
+The repository slug is intentionally unchanged for compatibility and discoverability. The product/user-facing name is **LoopCraft**; the Python package and Hermes plugin key remain `proofrail` until a migration layer exists.
+
 ## Current description
 
-Runtime harness plugin for Hermes with evidence-first execution, verification-first workflows, and self-correcting AI agent behavior.
+LoopCraft runtime harness plugin for Hermes with evidence-first execution, verification-first workflows, and self-correcting AI agent behavior. Installs as `proofrail` for compatibility.
 
 ## Current topics
 
@@ -16,6 +18,8 @@ Runtime harness plugin for Hermes with evidence-first execution, verification-fi
 - ai-agent
 - agent-harness
 - runtime-harness
+- loopcraft
+- loop-engineering
 - codex-harness
 - claude-code-harness
 - autonomous-coding

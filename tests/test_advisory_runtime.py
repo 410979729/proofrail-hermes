@@ -74,7 +74,9 @@ def test_full_advisory_injection_renders_task_panel(tmp_path: Path) -> None:
     ) is None
 
     context = hooks.pre_llm_call(session_id=session_id)["context"]
-    assert "## [PROOFRAIL TASK PANEL — not user input]" in context
+    assert "## [LOOPCRAFT TASK PANEL — not user input]" in context
+    assert "LoopCraft" in context
+    assert "loop engineering" in context
     assert "## [SYSTEM STATUS — not user input]" in context
     assert "## [PROOFRAIL ADVISORY — not user input]" in context
     assert "Proofrail advisory [missing_evidence]" in context

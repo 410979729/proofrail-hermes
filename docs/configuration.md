@@ -1,6 +1,8 @@
-# Configuration
+# LoopCraft Configuration
 
-The plugin works without configuration. The default behavior is optimized for autonomous Hermes instances: `enforcement_mode` defaults to `advisory`, so workflow risks are recorded as compact next-action advisories instead of blocking the tool call. Dangerous commands default to `warn`, which records advisory + audit and allows the command unless you choose a stricter command policy.
+LoopCraft works without configuration. The default behavior is optimized for autonomous Hermes instances: `enforcement_mode` defaults to `advisory`, so workflow risks are recorded as compact next-action advisories instead of blocking the tool call. Dangerous commands default to `warn`, which records advisory + audit and allows the command unless you choose a stricter command policy.
+
+For compatibility, the installed Python package and Hermes plugin key remain `proofrail`. Keep using `proofrail` in `plugins.enabled`, `plugins.entries`, import paths, and audit-path defaults until a deliberate migration layer exists. Product-facing documentation and runtime positioning use **LoopCraft**.
 
 If your Hermes build exposes plugin config through `plugins.entries`, use this shape:
 
@@ -107,8 +109,8 @@ If Hermes does not provide a root directory, the current working directory is us
 
 Enables the gray-area classifier path.
 
-- `false` — default. Proofrail only uses deterministic workflow rules.
-- `true` — when the host exposes `ctx.llm`, Proofrail adds an LLM-backed gray-area classifier after deterministic checks pass.
+- `false` — default. LoopCraft only uses deterministic workflow rules.
+- `true` — when the host exposes `ctx.llm`, LoopCraft adds an LLM-backed gray-area classifier after deterministic checks pass.
 
 The classifier never overrides deterministic blocks such as missing evidence or pending verification.
 
@@ -116,13 +118,13 @@ The classifier never overrides deterministic blocks such as missing evidence or 
 
 Optional provider override for the classifier model.
 
-If omitted or set to `null`, Proofrail does **not** force a provider and Hermes routes the classifier call through the current session's active main provider.
+If omitted or set to `null`, LoopCraft does **not** force a provider and Hermes routes the classifier call through the current session's active main provider.
 
 ### `llm_classifier_model`
 
 Optional model override for the classifier model.
 
-If omitted or set to `null`, Proofrail does **not** force a model and Hermes routes the classifier call through the current session's active main model.
+If omitted or set to `null`, LoopCraft does **not** force a model and Hermes routes the classifier call through the current session's active main model.
 
 Set `llm_classifier_provider` and `llm_classifier_model` together when you want the classifier to use a dedicated model. Leave both unset when you want it to follow the main model automatically.
 

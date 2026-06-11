@@ -68,6 +68,7 @@ def main() -> None:
         "audit.py",
         "validation.py",
         "task_ledger.py",
+        "task_understanding.py",
     }
     actual = {path.name for path in PACKAGE.glob("*.py")}
     missing = sorted(expected - actual)

@@ -1,20 +1,23 @@
-# Proofrail
+# LoopCraft
 
-Proofrail is a runtime harness plugin for Hermes that helps AI agents work more like careful engineers.
+LoopCraft is a Hermes-native **loop engineering** runtime for AI agents. It helps agents work more like careful engineers by turning tool use into a visible observe → plan → act → verify → closeout loop.
 
-If you're searching for a **Codex harness**, a **Claude Code harness**, or a general **agent harness** for Hermes, Proofrail is built for that job: it wraps real tool execution with evidence-first edits, verify-after-mutation workflow, high-risk command handling, and long-task context anchors.
+The repository still ships the Python package and Hermes plugin key as `proofrail` for compatibility with existing installs, but the product direction and user-facing name are **LoopCraft**.
+
+If you're searching for a **Codex harness**, a **Claude Code harness**, or a general **agent harness** for Hermes, LoopCraft is built for that job: it wraps real tool execution with evidence-first edits, verify-after-mutation workflow, high-risk command handling, long-task context anchors, and Superpowers-inspired methodology cues.
 
 It adds a repeatable execution process around tool use:
 
+- check the relevant skill/methodology before acting
 - record advisory risk before mutating existing files or local state
 - remind the agent to validate after changes before stacking more mutation
 - keep strict hard-block behavior available as an explicit compatibility mode
-- track session workflow state with **Observe / Execute / Review**
+- track session workflow state with **Observe / Execute / Review** plus LoopCraft loop steps
 - detect and handle high-risk commands with extra scrutiny
 - summarize oversized tool output before it pollutes model context
 - preserve task anchors so long runs lose less state
 
-The goal is simple: fewer blind edits, fewer unverified claims, and more reliable agent execution inside Hermes.
+The goal is simple: fewer blind edits, fewer unverified claims, and more reliable loop-engineered agent execution inside Hermes.
 
 ## Why this exists
 
@@ -22,9 +25,9 @@ The same model can feel very different in different agent runtimes.
 
 In one tool it behaves like a chatbot. In another it starts acting more like an engineer: it inspects first, gathers evidence before changing anything, validates after edits, and corrects itself when something fails.
 
-Proofrail focuses on that execution layer.
+LoopCraft focuses on that execution layer.
 
-It does not try to replace the model. It changes how the agent works during real tool use: how it observes, how it executes, how it validates, and how it self-corrects.
+It does not try to replace the model. It changes how the agent works during real tool use: how it chooses a method, how it observes, how it plans the smallest action, how it executes, how it validates, and how it self-corrects.
 
 For Hermes, that means a runtime plugin that can:
 
@@ -38,6 +41,8 @@ For Hermes, that means a runtime plugin that can:
 ## Current status
 
 - Version: `v0.0.8`
+- Product name: **LoopCraft**
+- Compatibility package/plugin key: `proofrail`
 - Host: **Hermes Agent plugin hooks**
 - Language: **Python**
 
@@ -65,6 +70,8 @@ If the target instance already has other plugins, append `proofrail` to the exis
 
 ## What it does at runtime
 
+- **LoopCraft loop panel** — inject a compact loop engineering cycle: skill/methodology check → observe → plan → act → verify → closeout
+- **Superpowers-inspired methodology cues** — adapt the useful parts of composable skill workflows (method selection, bite-sized plans, TDD/verification discipline, review/closeout) into Hermes runtime feedback rather than copying Claude-only plugin mechanics
 - **non-blocking workflow guidance** — missing evidence, pending verification, broad evidence, and repeated low-signal probes create actionable guidance by default instead of stopping the tool call
 - **verify after mutation** — validate changes before continuing
 - **strict compatibility mode** — `enforcement_mode: strict` preserves the older hard-block cooperative modes for deployments that need stricter enforcement
@@ -150,6 +157,7 @@ Core regression coverage currently includes:
 - audit log writing
 - touched-file and validation-hint injection
 - task ledger lifecycle
+- LoopCraft loop engineering positioning and Superpowers-inspired methodology step exposure
 - readback validation that clears `pending_verification` when the touched target is directly re-read
 - blocked-tool-call feedback reinjected into later reasoning context
 - summarize branding regression
@@ -175,6 +183,7 @@ pytest -q \
   tests/test_cooperative_modes.py \
   tests/test_classifier_fallback.py \
   tests/test_classifier_mode_mapping.py \
+  tests/test_loopcraft_positioning.py \
   tests/test_phase4_audit_and_wording.py \
   tests/test_phase5_mode_lifecycle.py \
   tests/test_phase6_behavior_simulation.py
@@ -202,6 +211,7 @@ See also:
 
 - `docs/architecture.md`
 - `docs/configuration.md`
+- `docs/loopcraft-functional-roadmap.md`
 - `DESIGN.md`
 - `SECURITY.md`
 - `CONTRIBUTING.md`

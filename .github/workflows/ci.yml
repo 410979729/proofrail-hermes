@@ -27,7 +27,10 @@ jobs:
             tests/test_classifier_mode_mapping.py \
             tests/test_phase4_audit_and_wording.py \
             tests/test_phase5_mode_lifecycle.py \
-            tests/test_phase6_behavior_simulation.py
+            tests/test_phase6_behavior_simulation.py \
+            tests/test_loopcraft_positioning.py \
+            tests/test_task_understanding.py \
+            tests/test_loopcraft_assistive_hygiene.py
       - run: rm -rf __pycache__ proofrail/__pycache__ tests/__pycache__ scripts/__pycache__ .pytest_cache
       - run: python scripts/check.release.py
       - run: python -m build --wheel

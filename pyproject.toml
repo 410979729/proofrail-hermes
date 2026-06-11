@@ -5,13 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "proofrail"
 version = "0.0.8"
-description = "Runtime harness plugin for Hermes with evidence-first execution, verification, and self-correcting agent workflows."
+description = "LoopCraft loop engineering runtime for Hermes with evidence-first execution, verification, and self-correcting agent workflows."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{name = "Yuheng"}]
-keywords = ["hermes", "agent", "runtime", "harness", "agent harness", "codex harness", "claude code harness", "evidence-first"]
+keywords = ["hermes", "agent", "runtime", "harness", "agent harness", "codex harness", "claude code harness", "loopcraft", "loop engineering", "evidence-first"]
 classifiers = [
   "Programming Language :: Python :: 3",
 ]

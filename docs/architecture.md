@@ -1,6 +1,8 @@
-# Architecture
+# LoopCraft Architecture
 
-Proofrail is a **Hermes-native Python autonomous coding harness**. It implements small, testable runtime primitives in Hermes hook callbacks: evidence-first execution, verify-after-mutation, low-signal probe control, dangerous-command audit, large-output summarization, and self-review reminders.
+LoopCraft is a **Hermes-native Python loop engineering runtime** for autonomous coding and operations agents. It implements small, testable runtime primitives in Hermes hook callbacks: evidence-first execution, verify-after-mutation, low-signal probe control, dangerous-command audit, large-output summarization, task self-routing reminders, cleanup-aware closeout, and self-review reminders.
+
+The repository still installs as the Python package and Hermes plugin key `proofrail` for compatibility with existing deployments. User-facing docs, runtime positioning, and product language use **LoopCraft** unless the text is specifically referring to the compatibility package/key, audit path, or legacy strict-mode behavior.
 
 ## Layers
 
@@ -68,12 +70,14 @@ on_session_start
   -> audit session_start
 
 pre_llm_call
-  -> inject behavior rules, phase, touched files, validation suggestions,
-     dangerous command audit reminders, and final evidence-report requirements
+  -> inject generated runtime context, phase, touched files, validation suggestions,
+     dangerous command audit reminders, self-routing checkpoints, and final
+     evidence/cleanup-report requirements
 
 pre_tool_call
   -> classify tool and command
-  -> block workflow violations when configured as hard guardrails
+  -> record assistive workflow reminders by default
+  -> block only in explicit compatibility strict/guarded paths
   -> dangerous commands default to warn/audit rather than manual approval
 
 post_tool_call
@@ -95,9 +99,11 @@ on_session_end / on_session_finalize
 1. **Autonomy first**: the plugin is designed for Hermes instances that usually run without manual approvals.
 2. **Evidence before mutation**: editing existing files or mutating local process state should be preceded by nearby evidence.
 3. **Verify after mutation**: after a mutation, the agent should run the narrowest validation before continuing.
-4. **Audit over approval**: high-risk commands can be allowed in autonomous mode, but they must be audited and reflected back into the next reasoning context.
-5. **Final evidence report**: if a session mutates state, the final answer should include root cause, changes, validation, evidence, and remaining risk.
-6. **Defensive, not sandbox**: this plugin is a workflow harness, not an OS permission boundary or full shell parser.
+4. **Generated context provenance**: injected LoopCraft/Proofrail panels are runtime context, not user speech, and must not be stored in SQL/scope-recall/long-term memory as user facts.
+5. **Assistive reminders**: agents should evaluate reminders against the user's request and live evidence, follow applicable reminders, and state why when a reminder is stale or wrong.
+6. **Audit over approval**: high-risk commands can be allowed in autonomous mode, but they must be audited and reflected back into the next reasoning context.
+7. **Final evidence + cleanup report**: if a session mutates state, the final answer should include root cause, changes, validation, evidence, cleanup status, and remaining risk.
+8. **Defensive, not sandbox**: this plugin is a workflow harness, not an OS permission boundary or full shell parser.
 
 ## Current limits
 
@@ -105,6 +111,7 @@ on_session_end / on_session_finalize
 - `explain_state()` is currently a runtime helper, not a first-class Hermes tool schema.
 - The validation suggestions are best-effort and should be treated as prompts to self-verify, not as guaranteed complete test plans.
 - No durable task ledger or compaction snapshot persistence yet.
+- Cleanup is a required closeout reminder after mutations; the plugin does not automatically delete files.
 
 ## Why this shape is open-source friendly
 
@@ -116,4 +123,4 @@ on_session_end / on_session_finalize
 
 ### `task_ledger.py`
 
-Session-level autonomous task ledger. It does not introduce a manual approval loop; it summarizes evidence, mutations, validations, high-risk actions, touched files, and final state into a task snapshot that can be injected into context and written to the audit log.
+Session-level autonomous task ledger. It does not introduce a manual approval loop; it summarizes evidence, mutations, validations, high-risk actions, touched files, task self-routing hints, cleanup-aware closeout requirements, and final state into a task snapshot that can be injected into context and written to the audit log.
