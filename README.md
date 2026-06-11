@@ -40,15 +40,15 @@ For Hermes, that means a runtime plugin that can:
 
 ## Current status
 
-- Version: `v0.0.8`
+- Version: `v0.0.9`
 - Product name: **LoopCraft**
 - Compatibility package/plugin key: `proofrail`
 - Host: **Hermes Agent plugin hooks**
 - Language: **Python**
 
-> Version note: the GitHub release/tag line is `v0.0.8`, while the Python package and wheel version is `0.0.8` to follow PEP 440. They refer to the same release.
+> Version note: the GitHub release/tag line is `v0.0.9`, while the Python package and wheel version is `0.0.9` to follow PEP 440. They refer to the same release.
 
-The current main branch is the `v0.0.8` line: default workflow risks are recorded as compact runtime guidance, while `enforcement_mode: strict` preserves the older hard-block/cooperative-mode behavior for operators that want it. This line also fixes Windows slash-style command switches such as `schtasks /End /TN ...` so they do not become phantom validation targets.
+The current main branch is the `v0.0.9` line: LoopCraft is the user-facing product name, while the package/plugin key remains `proofrail` for compatibility. Default workflow risks are recorded as compact runtime guidance, while `enforcement_mode: strict` preserves the older hard-block/cooperative-mode behavior for operators that want it.
 
 ## Quick start
 

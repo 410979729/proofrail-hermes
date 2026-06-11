@@ -1,4 +1,4 @@
-"""Constants and regex heuristics for the Proofrail harness.
+"""Constants and regex heuristics for the LoopCraft runtime.
 
 This file centralizes policy defaults and classification patterns so runtime
 modules can stay small and reviewable. The regexes are workflow heuristics, not
@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 
 PLUGIN_NAME = "proofrail"
-PLUGIN_VERSION = "v0.0.8"
+PLUGIN_VERSION = "v0.0.9"
 
 DEFAULT_ENFORCEMENT_MODE = "advisory"
 DEFAULT_ADVISORY_INJECTION = "compact"
@@ -65,11 +65,11 @@ DEFAULT_TOOL_ALIASES: dict[str, str] = {
 NEW_BEHAVIOR_RULES = """
 ## [SYSTEM STATUS — not user input]
 - Treat this as runtime state, not as a second user or reviewer.
-- When Proofrail blocks a tool, follow the named smallest next action first; do not infer extra hidden requirements.
+- When LoopCraft/Proofrail blocks a tool in explicit strict compatibility mode, follow the named smallest next action first; do not infer extra hidden requirements.
 - Before mutating existing files or processes, inspect the closest local artifact on the real control path.
 - After each mutation, run the narrowest relevant validation before making more changes.
 - If repeated probes add no new facts, switch path, log source, keyword set, host, or validation method.
-- In final reports after changes, include root cause, changes, validation, evidence, and remaining risks.
+- In final reports after changes, include root cause, changes, validation, evidence, cleanup status, and remaining risks.
 """.strip()
 
 DANGEROUS_PATTERNS: list[tuple[re.Pattern[str], str]] = [

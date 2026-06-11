@@ -1,5 +1,5 @@
 name: proofrail
-version: v0.0.8
+version: v0.0.9
 description: LoopCraft loop engineering runtime for Hermes; installed as proofrail for compatibility, with evidence-first execution, verification guidance, non-blocking workflow risk hints, and optional LLM gray-area classification.
 author: Yuheng
 provides_hooks:

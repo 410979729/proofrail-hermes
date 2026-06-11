@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "proofrail"
-version = "0.0.8"
+version = "0.0.9"
 description = "LoopCraft loop engineering runtime for Hermes with evidence-first execution, verification, and self-correcting agent workflows."
 readme = "README.md"
 requires-python = ">=3.11"

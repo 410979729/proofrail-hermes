@@ -1,4 +1,4 @@
-"""Hermes runtime plugin entrypoint for Proofrail."""
+"""Hermes runtime plugin entrypoint for LoopCraft, installed as proofrail."""
 
 try:
     from .proofrail import register

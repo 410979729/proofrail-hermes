@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.0.9 - 2026-06-11
 
 - Position the project as **LoopCraft**, a Hermes-native loop engineering runtime, while retaining the `proofrail` package/plugin key for compatibility.
 - Add `docs/loopcraft-functional-roadmap.md`, a feature roadmap grounded in Superpowers, Codex, Claude Code, Cline, Roo Code, Aider, Continue, and OpenHands patterns.

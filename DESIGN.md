@@ -143,9 +143,9 @@ Responsibilities:
 - inject phase summaries and runtime reminders
 - append context rather than rewriting the system prompt
 
-## Current v0.0.8 release line
+## Current v0.0.9 release line
 
-The public `v0.0.8` / `0.0.8` release line is the LoopCraft repositioning line. It keeps the package/plugin key `proofrail` for compatibility and includes:
+The public `v0.0.9` / `0.0.9` release line is the LoopCraft repositioning line. It keeps the package/plugin key `proofrail` for compatibility and includes:
 
 1. default `enforcement_mode=advisory`; workflow risks are recorded as advisories and compact next-action cards instead of blocking tool calls
 2. explicit `enforcement_mode=strict` compatibility for the older hard-block cooperative modes
@@ -166,8 +166,8 @@ The public `v0.0.8` / `0.0.8` release line is the LoopCraft repositioning line. 
 
 ## Version semantics
 
-- GitHub release/tag line: `v0.0.8`
-- Python package version: `0.0.8`
+- GitHub release/tag line: `v0.0.9`
+- Python package version: `0.0.9`
 
 This split is intentional: GitHub tags keep the leading `v`, while Python packaging follows PEP 440.
 
