@@ -21,6 +21,7 @@ _SHELL_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\+?=")
 _REDIRECT_PREFIX_RE = re.compile(r"^(?P<op>\d*(?:>>?|<<?)|&>|\d*>&)(?P<target>.*)$")
 _PYTHON_EXECUTABLE_RE = re.compile(r"^(?:python(?:\d+(?:\.\d+)?)?|pythonw(?:\d+(?:\.\d+)?)?|pypy(?:\d+(?:\.\d+)?)?)$")
 _WINDOWS_STYLE_SWITCH_RE = re.compile(r"^/[A-Za-z][A-Za-z0-9?]*$")
+_HEREDOC_REDIRECT_RE = re.compile(r"<<-?\s*(?P<quote>['\"]?)(?P<delimiter>[A-Za-z_][A-Za-z0-9_]*)?(?P=quote)")
 _WINDOWS_SWITCH_COMMANDS = {
     "cmd",
     "cmd.exe",
@@ -99,7 +100,37 @@ def summarize_paths(paths: Iterable[str], *, limit: int = 8) -> list[str]:
     return [*out[:limit], f"... {len(out) - limit} more"]
 
 
+def _strip_heredoc_bodies(command: str) -> str:
+    """Remove here-doc stdin bodies before shell-token path extraction.
+
+    The body of ``python - <<'PY' ... PY`` is source code, not shell argv.
+    Treating it as ordinary shell tokens poisoned strict validation with phantom
+    targets such as ``out.write_bytes(b`` or ``Image.Resampling.LANCZOS``.
+    """
+    lines = command.splitlines()
+    if not lines:
+        return command
+    kept: list[str] = []
+    pending_delimiters: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if pending_delimiters:
+            stripped = line.strip()
+            if stripped == pending_delimiters[0]:
+                pending_delimiters.pop(0)
+            index += 1
+            continue
+        kept.append(line)
+        delimiters = [match.group("delimiter") for match in _HEREDOC_REDIRECT_RE.finditer(line) if match.group("delimiter")]
+        if delimiters:
+            pending_delimiters.extend(str(delimiter) for delimiter in delimiters)
+        index += 1
+    return "\n".join(kept)
+
+
 def _command_path_hints(command: str) -> list[str]:
+    command = _strip_heredoc_bodies(command)
     try:
         parts = shlex.split(command)
     except ValueError:

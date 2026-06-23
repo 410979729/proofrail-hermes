@@ -151,6 +151,35 @@ def test_command_path_hints_ignore_python_dash_c_inline_code() -> None:
     assert hints == []
 
 
+def test_command_path_hints_ignore_python_heredoc_source_body() -> None:
+    hints = changed_path_hints(
+        "terminal",
+        {},
+        "python3 - <<'PY'\n"
+        "from pathlib import Path\n"
+        "\n"
+        "out = Path('/tmp/example.bin')\n"
+        "out.write_bytes(b'abc')\n"
+        "PY",
+    )
+
+    assert hints == []
+
+
+def test_command_path_hints_ignore_python_heredoc_attribute_access() -> None:
+    hints = changed_path_hints(
+        "terminal",
+        {},
+        "python3 - <<'PY'\n"
+        "from PIL import Image\n"
+        "\n"
+        "print(Image.Resampling.LANCZOS)\n"
+        "PY",
+    )
+
+    assert hints == []
+
+
 def test_command_path_hints_keep_python_script_path() -> None:
     assert changed_path_hints("terminal", {}, "python3 scripts/check.release.py") == ["scripts/check.release.py"]
 
