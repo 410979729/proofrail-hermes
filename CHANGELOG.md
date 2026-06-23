@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.0.11 - 2026-06-23
+
 - Ignore Python heredoc/stdin script bodies when extracting shell validation targets, preventing strict mode from treating Python method calls such as `out.write_bytes(...)` or attribute access such as `Image.Resampling.LANCZOS` as impossible touched paths.
 
 ## v0.0.10 - 2026-06-11

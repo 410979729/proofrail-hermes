@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 
 PLUGIN_NAME = "proofrail"
-PLUGIN_VERSION = "v0.0.10"
+PLUGIN_VERSION = "v0.0.11"
 
 DEFAULT_ENFORCEMENT_MODE = "advisory"
 DEFAULT_ADVISORY_INJECTION = "compact"
